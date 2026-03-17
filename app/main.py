@@ -33,13 +33,13 @@ ENTRY_LINE = "#6ea8ff"
 SL_LINE = "#d15a52"
 TP_LINE = "#2ebd7f"
 TIMEFRAME_OPTIONS = (
-    ("1分", mt5.TIMEFRAME_M1, "1分足"),
-    ("5分", mt5.TIMEFRAME_M5, "5分足"),
-    ("15分", mt5.TIMEFRAME_M15, "15分足"),
-    ("30分", mt5.TIMEFRAME_M30, "30分足"),
-    ("1時間", mt5.TIMEFRAME_H1, "1時間足"),
-    ("4時間", mt5.TIMEFRAME_H4, "4時間足"),
-    ("日足", mt5.TIMEFRAME_D1, "日足"),
+    ("1分", mt5.TIMEFRAME_M1),
+    ("5分", mt5.TIMEFRAME_M5),
+    ("15分", mt5.TIMEFRAME_M15),
+    ("30分", mt5.TIMEFRAME_M30),
+    ("1時間", mt5.TIMEFRAME_H1),
+    ("4時間", mt5.TIMEFRAME_H4),
+    ("日足", mt5.TIMEFRAME_D1),
 )
 DEFAULT_TIMEFRAME_LABEL = "1分"
 SYMBOL_ROWS = (
@@ -246,12 +246,16 @@ class MT5RateMonitorApp:
             }
             for symbol in ALL_SYMBOLS
         }
-        self.timeframe_label_var = tk.StringVar(value="1分足")
         self.selected_timeframe_label = DEFAULT_TIMEFRAME_LABEL
         self.selected_timeframe_code = self._get_timeframe_code(DEFAULT_TIMEFRAME_LABEL)
         self.account_summary_var = tk.StringVar(value="残高: --    有効証拠金: --    必要証拠金: --    余剰証拠金: --    証拠金維持率: --")
         self.timeframe_buttons: dict[str, ttk.Button] = {}
         self.chart_canvases: dict[str, tk.Canvas] = {}
+        self.chart_tiles: dict[str, ttk.Frame] = {}
+        self.maximize_buttons: dict[str, ttk.Button] = {}
+        self.tile_positions: dict[str, tuple[int, int]] = {}
+        self.maximized_symbol: str | None = None
+        self.content_frame: ttk.Frame | None = None
         self.positions_tree: ttk.Treeview | None = None
         self.stop_event = threading.Event()
         self.closing = False
@@ -269,6 +273,21 @@ class MT5RateMonitorApp:
         style.configure("TileSub.TLabel", background=TILE_BG, foreground=TEXT_SOFT)
         style.configure("BidHero.TLabel", background=TILE_BG, foreground=BID_COLOR)
         style.configure("AskHero.TLabel", background=TILE_BG, foreground=ASK_COLOR)
+        style.configure(
+            "TileAction.TButton",
+            padding=(3, 1),
+            font=("Yu Gothic UI Semibold", 8),
+            background=BUTTON_BG,
+            foreground=BUTTON_TEXT,
+            bordercolor=TILE_EDGE,
+            lightcolor=BUTTON_BG,
+            darkcolor=BUTTON_BG,
+        )
+        style.map(
+            "TileAction.TButton",
+            background=[("active", "#1d2d46"), ("pressed", "#20324f")],
+            foreground=[("active", "#ffffff"), ("pressed", "#ffffff")],
+        )
         style.configure("Bottom.TFrame", background=TILE_BG)
         style.configure("Summary.TLabel", background=TILE_BG, foreground=TEXT_MAIN)
         style.configure("Toolbar.TFrame", background=PAGE_BG)
@@ -340,7 +359,7 @@ class MT5RateMonitorApp:
 
         toolbar = ttk.Frame(outer, style="Toolbar.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        for index, (label, _, __) in enumerate(TIMEFRAME_OPTIONS):
+        for index, (label, _) in enumerate(TIMEFRAME_OPTIONS):
             button = ttk.Button(
                 toolbar,
                 text=label,
@@ -353,6 +372,7 @@ class MT5RateMonitorApp:
 
         content = ttk.Frame(outer, style="Page.TFrame")
         content.grid(row=1, column=0, sticky="nsew")
+        self.content_frame = content
         for column_index in range(4):
             content.columnconfigure(column_index, weight=1)
         for row_index in range(2):
@@ -368,6 +388,8 @@ class MT5RateMonitorApp:
                     padx=5,
                     pady=5,
                 )
+                self.chart_tiles[symbol] = tile
+                self.tile_positions[symbol] = (row_index, column_index)
                 tile.columnconfigure(0, weight=1)
                 tile.columnconfigure(1, weight=1)
                 tile.rowconfigure(1, weight=1)
@@ -393,12 +415,15 @@ class MT5RateMonitorApp:
                     style="AskHero.TLabel",
                     font=("Consolas", 11, "bold"),
                 ).grid(row=0, column=1, sticky="e", padx=(0, 10))
-                ttk.Label(
+                button = ttk.Button(
                     header_right,
-                    textvariable=self.timeframe_label_var,
-                    style="TileSub.TLabel",
-                    font=("Yu Gothic UI", 7),
-                ).grid(row=0, column=2, sticky="e")
+                    text="□",
+                    command=lambda value=symbol: self._toggle_maximize(value),
+                    style="TileAction.TButton",
+                    width=2,
+                )
+                button.grid(row=0, column=2, sticky="e", padx=(0, 6))
+                self.maximize_buttons[symbol] = button
 
                 canvas = tk.Canvas(
                     tile,
@@ -748,21 +773,14 @@ class MT5RateMonitorApp:
             )
 
     def _get_timeframe_code(self, label: str) -> int:
-        for timeframe_label, timeframe_code, _ in TIMEFRAME_OPTIONS:
+        for timeframe_label, timeframe_code in TIMEFRAME_OPTIONS:
             if timeframe_label == label:
                 return timeframe_code
-        raise ValueError(f"未対応の時間足です: {label}")
-
-    def _get_timeframe_display(self, label: str) -> str:
-        for timeframe_label, _, timeframe_display in TIMEFRAME_OPTIONS:
-            if timeframe_label == label:
-                return timeframe_display
         raise ValueError(f"未対応の時間足です: {label}")
 
     def _change_timeframe(self, label: str) -> None:
         self.selected_timeframe_label = label
         self.selected_timeframe_code = self._get_timeframe_code(label)
-        self.timeframe_label_var.set(self._get_timeframe_display(label))
         self._refresh_timeframe_buttons()
         self._set_window_title("更新中")
 
@@ -770,6 +788,46 @@ class MT5RateMonitorApp:
         for label, button in self.timeframe_buttons.items():
             style_name = "TimeButtonActive.TButton" if label == self.selected_timeframe_label else "TimeButton.TButton"
             button.configure(style=style_name)
+
+    def _toggle_maximize(self, symbol: str) -> None:
+        if self.content_frame is None:
+            return
+
+        if self.maximized_symbol == symbol:
+            self.maximized_symbol = None
+            for current_symbol, tile in self.chart_tiles.items():
+                row_index, column_index = self.tile_positions[current_symbol]
+                tile.grid()
+                tile.grid_configure(
+                    row=row_index,
+                    column=column_index,
+                    rowspan=1,
+                    columnspan=1,
+                    sticky="nsew",
+                    padx=5,
+                    pady=5,
+                )
+                self.maximize_buttons[current_symbol].configure(text="□")
+            return
+
+        self.maximized_symbol = symbol
+        for current_symbol, tile in self.chart_tiles.items():
+            if current_symbol == symbol:
+                tile.grid()
+                tile.grid_configure(
+                    row=0,
+                    column=0,
+                    rowspan=2,
+                    columnspan=4,
+                    sticky="nsew",
+                    padx=5,
+                    pady=5,
+                )
+                self.maximize_buttons[current_symbol].configure(text="▣")
+                continue
+
+            tile.grid_remove()
+            self.maximize_buttons[current_symbol].configure(text="□")
 
     def _call_on_main_thread(self, callback: Callable[[], None]) -> None:
         if self.closing:
