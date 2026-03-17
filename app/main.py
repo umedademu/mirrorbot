@@ -118,11 +118,17 @@ class MT5RateMonitorApp:
         self.root.minsize(1080, 560)
         self.root.configure(bg="#eef2f6")
 
-        self.status_var = tk.StringVar(value="接続待機中")
         self.quote_vars = {
             symbol: {
                 "bid": tk.StringVar(value="--"),
                 "ask": tk.StringVar(value="--"),
+            }
+            for symbol in ALL_SYMBOLS
+        }
+        self.header_quote_vars = {
+            symbol: {
+                "bid": tk.StringVar(value="BID --"),
+                "ask": tk.StringVar(value="ASK --"),
             }
             for symbol in ALL_SYMBOLS
         }
@@ -138,47 +144,19 @@ class MT5RateMonitorApp:
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("Page.TFrame", background="#eef2f6")
-        style.configure("Card.TFrame", background="#ffffff")
         style.configure("Tile.TFrame", background="#f8fafc")
-        style.configure("Headline.TLabel", background="#ffffff", foreground="#0f172a")
-        style.configure("Muted.TLabel", background="#ffffff", foreground="#64748b")
         style.configure("TileSymbol.TLabel", background="#f8fafc", foreground="#0f172a")
-        style.configure("TileKey.TLabel", background="#f8fafc", foreground="#64748b")
-        style.configure("TileValue.TLabel", background="#f8fafc", foreground="#111827")
         style.configure("TileSub.TLabel", background="#f8fafc", foreground="#64748b")
+        style.configure("BidHero.TLabel", background="#f8fafc", foreground="#0f9d58")
+        style.configure("AskHero.TLabel", background="#f8fafc", foreground="#d93025")
 
         outer = ttk.Frame(self.root, style="Page.TFrame", padding=16)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(1, weight=1)
-
-        header = ttk.Frame(outer, style="Card.TFrame", padding=16)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        header.columnconfigure(0, weight=1)
-
-        ttk.Label(
-            header,
-            text="MT5 監視銘柄",
-            style="Headline.TLabel",
-            font=("Yu Gothic UI Semibold", 18),
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            header,
-            text="売値と買値を更新し、各銘柄に１分足を表示",
-            style="Muted.TLabel",
-            font=("Yu Gothic UI", 9),
-            wraplength=520,
-            justify="left",
-        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(
-            header,
-            textvariable=self.status_var,
-            style="Muted.TLabel",
-            font=("Yu Gothic UI", 9),
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        outer.rowconfigure(0, weight=1)
 
         content = ttk.Frame(outer, style="Page.TFrame")
-        content.grid(row=1, column=0, sticky="nsew")
+        content.grid(row=0, column=0, sticky="nsew")
         for column_index in range(4):
             content.columnconfigure(column_index, weight=1)
         for row_index in range(2):
@@ -194,6 +172,7 @@ class MT5RateMonitorApp:
                     padx=5,
                     pady=5,
                 )
+                tile.columnconfigure(0, weight=1)
                 tile.columnconfigure(1, weight=1)
                 tile.rowconfigure(1, weight=1)
 
@@ -201,61 +180,51 @@ class MT5RateMonitorApp:
                     tile,
                     text=symbol,
                     style="TileSymbol.TLabel",
-                    font=("Yu Gothic UI Semibold", 12),
+                    font=("Yu Gothic UI", 10),
                 ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+                header_right = ttk.Frame(tile, style="Tile.TFrame")
+                header_right.grid(row=0, column=1, sticky="e", pady=(0, 6))
                 ttk.Label(
-                    tile,
+                    header_right,
+                    textvariable=self.header_quote_vars[symbol]["bid"],
+                    style="BidHero.TLabel",
+                    font=("Consolas", 11, "bold"),
+                ).grid(row=0, column=0, sticky="e", padx=(0, 10))
+                ttk.Label(
+                    header_right,
+                    textvariable=self.header_quote_vars[symbol]["ask"],
+                    style="AskHero.TLabel",
+                    font=("Consolas", 11, "bold"),
+                ).grid(row=0, column=1, sticky="e", padx=(0, 10))
+                ttk.Label(
+                    header_right,
                     text="１分足",
                     style="TileSub.TLabel",
-                    font=("Yu Gothic UI", 8),
-                ).grid(row=0, column=1, sticky="e", pady=(0, 6))
+                    font=("Yu Gothic UI", 7),
+                ).grid(row=0, column=2, sticky="e")
 
                 canvas = tk.Canvas(
                     tile,
                     width=210,
-                    height=64,
+                    height=136,
                     bg="#f8fafc",
                     bd=0,
                     highlightthickness=0,
                     relief="flat",
                 )
-                canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+                canvas.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 6))
                 self.chart_canvases[symbol] = canvas
 
-                ttk.Label(
-                    tile,
-                    text="売値",
-                    style="TileKey.TLabel",
-                    font=("Yu Gothic UI", 8),
-                ).grid(row=2, column=0, sticky="w")
-                ttk.Label(
-                    tile,
-                    textvariable=self.quote_vars[symbol]["bid"],
-                    style="TileValue.TLabel",
-                    font=("Consolas", 12),
-                ).grid(row=2, column=1, sticky="e")
-                ttk.Label(
-                    tile,
-                    text="買値",
-                    style="TileKey.TLabel",
-                    font=("Yu Gothic UI", 8),
-                ).grid(row=3, column=0, sticky="w", pady=(4, 0))
-                ttk.Label(
-                    tile,
-                    textvariable=self.quote_vars[symbol]["ask"],
-                    style="TileValue.TLabel",
-                    font=("Consolas", 12),
-                ).grid(row=3, column=1, sticky="e", pady=(4, 0))
-
     def _start_monitor(self) -> None:
-        self.status_var.set("MT5 に接続中...")
+        self._set_window_title("接続中")
         thread = threading.Thread(target=self._monitor_loop, daemon=True)
         thread.start()
 
     def _monitor_loop(self) -> None:
         try:
             initialize_mt5()
-            self._call_on_main_thread(lambda: self.status_var.set("接続済み"))
+            self._call_on_main_thread(lambda: self._set_window_title("接続済み"))
 
             while not self.stop_event.is_set():
                 snapshots = fetch_snapshots()
@@ -268,24 +237,30 @@ class MT5RateMonitorApp:
 
     def _apply_rates(self, snapshots: dict[str, SymbolSnapshot]) -> None:
         for symbol, snapshot in snapshots.items():
-            self.quote_vars[symbol]["bid"].set(format_price(snapshot.bid, snapshot.digits))
-            self.quote_vars[symbol]["ask"].set(format_price(snapshot.ask, snapshot.digits))
+            bid_text = format_price(snapshot.bid, snapshot.digits)
+            ask_text = format_price(snapshot.ask, snapshot.digits)
+            self.quote_vars[symbol]["bid"].set(bid_text)
+            self.quote_vars[symbol]["ask"].set(ask_text)
+            self.header_quote_vars[symbol]["bid"].set(f"BID {bid_text}")
+            self.header_quote_vars[symbol]["ask"].set(f"ASK {ask_text}")
             self._draw_chart(self.chart_canvases[symbol], snapshot.bars)
 
     def _apply_error(self, message: str) -> None:
         for symbol in ALL_SYMBOLS:
             self.quote_vars[symbol]["bid"].set("--")
             self.quote_vars[symbol]["ask"].set("--")
+            self.header_quote_vars[symbol]["bid"].set("BID --")
+            self.header_quote_vars[symbol]["ask"].set("ASK --")
             self.chart_canvases[symbol].delete("all")
-        self.status_var.set(message)
+        self._set_window_title(message)
 
     def _draw_chart(self, canvas: tk.Canvas, bars: tuple[CandleBar, ...]) -> None:
         width = max(canvas.winfo_width(), 210)
-        height = max(canvas.winfo_height(), 64)
-        top_padding = 6
-        bottom_padding = 6
-        left_padding = 6
-        right_padding = 6
+        height = max(canvas.winfo_height(), 136)
+        top_padding = 2
+        bottom_padding = 2
+        left_padding = 4
+        right_padding = 4
 
         canvas.delete("all")
         canvas.create_rectangle(0, 0, width, height, fill="#f8fafc", outline="")
@@ -349,6 +324,9 @@ class MT5RateMonitorApp:
                 fill=body_color,
                 outline=line_color,
             )
+
+    def _set_window_title(self, message: str) -> None:
+        self.root.title(f"MT5 Rate Monitor - {message}")
 
     def _call_on_main_thread(self, callback: Callable[[], None]) -> None:
         if self.closing:
