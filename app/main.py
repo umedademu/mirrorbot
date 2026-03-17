@@ -12,6 +12,7 @@ import MetaTrader5 as mt5
 
 
 UPDATE_INTERVAL_MS = 500
+CHART_BAR_COUNT = 30
 SYMBOL_COLUMNS = (
     ("USDJPYm", "EURUSDm", "JP225m", "USOILm"),
     ("XAUUSDm", "XAGUSDm", "BTCUSDm", "ETHUSDm"),
@@ -20,11 +21,20 @@ ALL_SYMBOLS = tuple(symbol for column in SYMBOL_COLUMNS for symbol in column)
 
 
 @dataclass(frozen=True)
-class RateSnapshot:
+class CandleBar:
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+@dataclass(frozen=True)
+class SymbolSnapshot:
     symbol: str
     bid: float
     ask: float
     digits: int
+    bars: tuple[CandleBar, ...]
 
 
 DEFAULT_TERMINAL_CANDIDATES = (
@@ -62,22 +72,34 @@ def initialize_mt5() -> None:
             raise RuntimeError(f"{symbol} を表示対象にできません: [{code}] {message}")
 
 
-def fetch_rates() -> dict[str, RateSnapshot]:
-    snapshots: dict[str, RateSnapshot] = {}
+def fetch_snapshots() -> dict[str, SymbolSnapshot]:
+    snapshots: dict[str, SymbolSnapshot] = {}
 
     for symbol in ALL_SYMBOLS:
         info = mt5.symbol_info(symbol)
         tick = mt5.symbol_info_tick(symbol)
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, CHART_BAR_COUNT)
 
-        if info is None or tick is None:
+        if info is None or tick is None or rates is None or len(rates) == 0:
             code, message = mt5.last_error()
-            raise RuntimeError(f"{symbol} の値段を取得できません: [{code}] {message}")
+            raise RuntimeError(f"{symbol} の値段か足を取得できません: [{code}] {message}")
 
-        snapshots[symbol] = RateSnapshot(
+        bars = tuple(
+            CandleBar(
+                open=float(rate["open"]),
+                high=float(rate["high"]),
+                low=float(rate["low"]),
+                close=float(rate["close"]),
+            )
+            for rate in rates
+        )
+
+        snapshots[symbol] = SymbolSnapshot(
             symbol=symbol,
             bid=tick.bid,
             ask=tick.ask,
             digits=info.digits,
+            bars=bars,
         )
 
     return snapshots
@@ -92,8 +114,8 @@ class MT5RateMonitorApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("MT5 Rate Monitor")
-        self.root.geometry("860x620")
-        self.root.minsize(760, 560)
+        self.root.geometry("980x860")
+        self.root.minsize(900, 780)
         self.root.configure(bg="#eef2f6")
 
         self.status_var = tk.StringVar(value="接続待機中")
@@ -104,6 +126,7 @@ class MT5RateMonitorApp:
             }
             for symbol in ALL_SYMBOLS
         }
+        self.chart_canvases: dict[str, tk.Canvas] = {}
         self.stop_event = threading.Event()
         self.closing = False
 
@@ -122,6 +145,7 @@ class MT5RateMonitorApp:
         style.configure("TileSymbol.TLabel", background="#f8fafc", foreground="#0f172a")
         style.configure("TileKey.TLabel", background="#f8fafc", foreground="#64748b")
         style.configure("TileValue.TLabel", background="#f8fafc", foreground="#111827")
+        style.configure("TileSub.TLabel", background="#f8fafc", foreground="#64748b")
 
         outer = ttk.Frame(self.root, style="Page.TFrame", padding=20)
         outer.pack(fill="both", expand=True)
@@ -140,7 +164,7 @@ class MT5RateMonitorApp:
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="0.5秒ごとに売値と買値を更新",
+            text="0.5秒ごとに売値と買値を更新し、各銘柄の１分足を表示",
             style="Muted.TLabel",
             font=("Yu Gothic UI", 10),
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
@@ -170,37 +194,56 @@ class MT5RateMonitorApp:
                 tile = ttk.Frame(column_frame, style="Tile.TFrame", padding=18)
                 tile.grid(row=row_index, column=0, sticky="ew", pady=(0, 14))
                 tile.columnconfigure(1, weight=1)
+                tile.rowconfigure(1, weight=1)
 
                 ttk.Label(
                     tile,
                     text=symbol,
                     style="TileSymbol.TLabel",
                     font=("Yu Gothic UI Semibold", 14),
-                ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+                ).grid(row=0, column=0, sticky="w", pady=(0, 10))
+                ttk.Label(
+                    tile,
+                    text="１分足",
+                    style="TileSub.TLabel",
+                    font=("Yu Gothic UI", 9),
+                ).grid(row=0, column=1, sticky="e", pady=(0, 10))
+
+                canvas = tk.Canvas(
+                    tile,
+                    height=92,
+                    bg="#f8fafc",
+                    bd=0,
+                    highlightthickness=0,
+                    relief="flat",
+                )
+                canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+                self.chart_canvases[symbol] = canvas
+
                 ttk.Label(
                     tile,
                     text="売値",
                     style="TileKey.TLabel",
                     font=("Yu Gothic UI", 10),
-                ).grid(row=1, column=0, sticky="w")
+                ).grid(row=2, column=0, sticky="w")
                 ttk.Label(
                     tile,
                     textvariable=self.quote_vars[symbol]["bid"],
                     style="TileValue.TLabel",
                     font=("Consolas", 16),
-                ).grid(row=1, column=1, sticky="e")
+                ).grid(row=2, column=1, sticky="e")
                 ttk.Label(
                     tile,
                     text="買値",
                     style="TileKey.TLabel",
                     font=("Yu Gothic UI", 10),
-                ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+                ).grid(row=3, column=0, sticky="w", pady=(8, 0))
                 ttk.Label(
                     tile,
                     textvariable=self.quote_vars[symbol]["ask"],
                     style="TileValue.TLabel",
                     font=("Consolas", 16),
-                ).grid(row=2, column=1, sticky="e", pady=(8, 0))
+                ).grid(row=3, column=1, sticky="e", pady=(8, 0))
 
     def _start_monitor(self) -> None:
         self.status_var.set("MT5 に接続中...")
@@ -213,7 +256,7 @@ class MT5RateMonitorApp:
             self._call_on_main_thread(lambda: self.status_var.set("接続済み"))
 
             while not self.stop_event.is_set():
-                snapshots = fetch_rates()
+                snapshots = fetch_snapshots()
                 self._call_on_main_thread(lambda data=snapshots: self._apply_rates(data))
                 self.stop_event.wait(UPDATE_INTERVAL_MS / 1000)
         except Exception as exc:  # pragma: no cover
@@ -221,16 +264,89 @@ class MT5RateMonitorApp:
         finally:
             mt5.shutdown()
 
-    def _apply_rates(self, snapshots: dict[str, RateSnapshot]) -> None:
+    def _apply_rates(self, snapshots: dict[str, SymbolSnapshot]) -> None:
         for symbol, snapshot in snapshots.items():
             self.quote_vars[symbol]["bid"].set(format_price(snapshot.bid, snapshot.digits))
             self.quote_vars[symbol]["ask"].set(format_price(snapshot.ask, snapshot.digits))
+            self._draw_chart(self.chart_canvases[symbol], snapshot.bars)
 
     def _apply_error(self, message: str) -> None:
         for symbol in ALL_SYMBOLS:
             self.quote_vars[symbol]["bid"].set("--")
             self.quote_vars[symbol]["ask"].set("--")
+            self.chart_canvases[symbol].delete("all")
         self.status_var.set(message)
+
+    def _draw_chart(self, canvas: tk.Canvas, bars: tuple[CandleBar, ...]) -> None:
+        width = max(canvas.winfo_width(), 320)
+        height = max(canvas.winfo_height(), 92)
+        top_padding = 8
+        bottom_padding = 8
+        left_padding = 8
+        right_padding = 8
+
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width, height, fill="#f8fafc", outline="")
+
+        if not bars:
+            return
+
+        low_price = min(bar.low for bar in bars)
+        high_price = max(bar.high for bar in bars)
+
+        if high_price == low_price:
+            high_price += 1
+            low_price -= 1
+
+        chart_height = height - top_padding - bottom_padding
+        chart_width = width - left_padding - right_padding
+        candle_space = chart_width / max(len(bars), 1)
+        candle_body_width = max(min(candle_space * 0.55, 10), 3)
+
+        def to_y(price: float) -> float:
+            ratio = (price - low_price) / (high_price - low_price)
+            return top_padding + chart_height - (ratio * chart_height)
+
+        for guide_ratio in (0.25, 0.5, 0.75):
+            y = top_padding + chart_height * guide_ratio
+            canvas.create_line(left_padding, y, width - right_padding, y, fill="#d7dee7")
+
+        for index, bar in enumerate(bars):
+            center_x = left_padding + (index + 0.5) * candle_space
+            high_y = to_y(bar.high)
+            low_y = to_y(bar.low)
+            open_y = to_y(bar.open)
+            close_y = to_y(bar.close)
+
+            is_up = bar.close >= bar.open
+            line_color = "#0f9d58" if is_up else "#d93025"
+            body_color = "#8ad2aa" if is_up else "#f2a8a0"
+
+            canvas.create_line(center_x, high_y, center_x, low_y, fill=line_color, width=1)
+
+            top_y = min(open_y, close_y)
+            bottom_y = max(open_y, close_y)
+
+            if abs(bottom_y - top_y) < 2:
+                mid_y = (top_y + bottom_y) / 2
+                canvas.create_line(
+                    center_x - candle_body_width / 2,
+                    mid_y,
+                    center_x + candle_body_width / 2,
+                    mid_y,
+                    fill=line_color,
+                    width=2,
+                )
+                continue
+
+            canvas.create_rectangle(
+                center_x - candle_body_width / 2,
+                top_y,
+                center_x + candle_body_width / 2,
+                bottom_y,
+                fill=body_color,
+                outline=line_color,
+            )
 
     def _call_on_main_thread(self, callback: Callable[[], None]) -> None:
         if self.closing:
