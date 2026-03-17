@@ -29,6 +29,9 @@ BULL_LINE = "#3bd68c"
 BEAR_LINE = "#ff6b5f"
 BULL_FILL = "#1f8f66"
 BEAR_FILL = "#9f3f39"
+ENTRY_LINE = "#6ea8ff"
+SL_LINE = "#d15a52"
+TP_LINE = "#2ebd7f"
 TIMEFRAME_OPTIONS = (
     ("1分", mt5.TIMEFRAME_M1, "1分足"),
     ("5分", mt5.TIMEFRAME_M5, "5分足"),
@@ -69,6 +72,7 @@ class PositionSnapshot:
     ticket: str
     time_text: str
     trade_type: str
+    trade_type_label: str
     volume: str
     price_open: str
     sl: str
@@ -76,6 +80,19 @@ class PositionSnapshot:
     price_current: str
     swap: str
     profit: str
+    digits: int
+    price_open_value: float
+    sl_value: float
+    tp_value: float
+    price_current_value: float
+
+
+@dataclass(frozen=True)
+class ChartMarker:
+    label: str
+    price: float
+    line_color: str
+    box_color: str
 
 
 @dataclass(frozen=True)
@@ -176,6 +193,7 @@ def fetch_positions_and_account() -> tuple[tuple[PositionSnapshot, ...], Account
                 ticket=str(position.ticket),
                 time_text=time_text,
                 trade_type=trade_type,
+                trade_type_label="buy" if trade_type == "buy" else "sell",
                 volume=f"{position.volume:g}",
                 price_open=format_price(position.price_open, digits),
                 sl=format_price(position.sl, digits),
@@ -183,6 +201,11 @@ def fetch_positions_and_account() -> tuple[tuple[PositionSnapshot, ...], Account
                 price_current=format_price(position.price_current, digits),
                 swap=f"{position.swap:,.2f}",
                 profit=f"{position.profit:,.2f}",
+                digits=digits,
+                price_open_value=float(position.price_open),
+                sl_value=float(position.sl),
+                tp_value=float(position.tp),
+                price_current_value=float(position.price_current),
             )
         )
 
@@ -477,6 +500,10 @@ class MT5RateMonitorApp:
         positions: tuple[PositionSnapshot, ...],
         account: AccountSnapshot,
     ) -> None:
+        positions_by_symbol: dict[str, list[PositionSnapshot]] = {}
+        for position in positions:
+            positions_by_symbol.setdefault(position.symbol, []).append(position)
+
         for symbol, snapshot in snapshots.items():
             bid_text = format_price(snapshot.bid, snapshot.digits)
             ask_text = format_price(snapshot.ask, snapshot.digits)
@@ -484,7 +511,11 @@ class MT5RateMonitorApp:
             self.quote_vars[symbol]["ask"].set(ask_text)
             self.header_quote_vars[symbol]["bid"].set(f"BID {bid_text}")
             self.header_quote_vars[symbol]["ask"].set(f"ASK {ask_text}")
-            self._draw_chart(self.chart_canvases[symbol], snapshot.bars)
+            self._draw_chart(
+                self.chart_canvases[symbol],
+                snapshot,
+                tuple(positions_by_symbol.get(symbol, ())),
+            )
         self._refresh_positions(positions)
         self.account_summary_var.set(account.summary_text)
         self._set_window_title("接続済み")
@@ -500,7 +531,13 @@ class MT5RateMonitorApp:
         self.account_summary_var.set("残高: --    有効証拠金: --    必要証拠金: --    余剰証拠金: --    証拠金維持率: --")
         self._set_window_title(message)
 
-    def _draw_chart(self, canvas: tk.Canvas, bars: tuple[CandleBar, ...]) -> None:
+    def _draw_chart(
+        self,
+        canvas: tk.Canvas,
+        snapshot: SymbolSnapshot,
+        positions: tuple[PositionSnapshot, ...],
+    ) -> None:
+        bars = snapshot.bars
         width = max(canvas.winfo_width(), 210)
         height = max(canvas.winfo_height(), 136)
         top_padding = 2
@@ -514,6 +551,7 @@ class MT5RateMonitorApp:
         if not bars:
             return
 
+        markers = self._build_chart_markers(snapshot, positions)
         low_price = min(bar.low for bar in bars)
         high_price = max(bar.high for bar in bars)
 
@@ -570,6 +608,117 @@ class MT5RateMonitorApp:
                 fill=body_color,
                 outline=line_color,
             )
+
+        self._draw_position_markers(
+            canvas,
+            width,
+            height,
+            top_padding,
+            bottom_padding,
+            left_padding,
+            right_padding,
+            to_y,
+            markers,
+        )
+
+    def _build_chart_markers(
+        self,
+        snapshot: SymbolSnapshot,
+        positions: tuple[PositionSnapshot, ...],
+    ) -> tuple[ChartMarker, ...]:
+        markers: list[ChartMarker] = []
+        for index, position in enumerate(positions, start=1):
+            suffix = "" if len(positions) == 1 else f"#{index} "
+            markers.append(
+                ChartMarker(
+                    label=f"{suffix}{position.trade_type_label} {position.price_open}",
+                    price=position.price_open_value,
+                    line_color=ENTRY_LINE,
+                    box_color="#17345d",
+                )
+            )
+            if position.sl_value > 0:
+                markers.append(
+                    ChartMarker(
+                        label=f"{suffix}S/L {position.sl}",
+                        price=position.sl_value,
+                        line_color=SL_LINE,
+                        box_color="#4a2020",
+                    )
+                )
+            if position.tp_value > 0:
+                markers.append(
+                    ChartMarker(
+                        label=f"{suffix}T/P {position.tp}",
+                        price=position.tp_value,
+                        line_color=TP_LINE,
+                        box_color="#163e2d",
+                    )
+                )
+
+        return tuple(markers)
+
+    def _draw_position_markers(
+        self,
+        canvas: tk.Canvas,
+        width: int,
+        height: int,
+        top_padding: int,
+        bottom_padding: int,
+        left_padding: int,
+        right_padding: int,
+        to_y: Callable[[float], float],
+        markers: tuple[ChartMarker, ...],
+    ) -> None:
+        if not markers:
+            return
+
+        label_x = width - right_padding - 4
+        used_y: list[float] = []
+
+        for marker in sorted(markers, key=lambda item: item.price, reverse=True):
+            line_y = to_y(marker.price)
+            if line_y < top_padding or line_y > height - bottom_padding:
+                continue
+
+            canvas.create_line(
+                left_padding,
+                line_y,
+                width - right_padding - 86,
+                line_y,
+                fill=marker.line_color,
+                width=1,
+                dash=(2, 6),
+            )
+
+            label_y = max(10, min(height - 10, line_y))
+            for existing_y in used_y:
+                if abs(label_y - existing_y) < 14:
+                    label_y = min(height - 10, existing_y + 14)
+            used_y.append(label_y)
+
+            text_id = canvas.create_text(
+                label_x,
+                label_y,
+                text=marker.label,
+                fill="#ffffff",
+                font=("Yu Gothic UI Semibold", 7),
+                anchor="e",
+            )
+            text_box = canvas.bbox(text_id)
+            if text_box is None:
+                continue
+            padding_x = 5
+            padding_y = 2
+            canvas.create_rectangle(
+                text_box[0] - padding_x,
+                text_box[1] - padding_y,
+                text_box[2] + padding_x,
+                text_box[3] + padding_y,
+                fill=marker.box_color,
+                outline=marker.line_color,
+            )
+            canvas.tag_raise(text_id)
 
     def _set_window_title(self, message: str) -> None:
         self.root.title(f"MT5 Rate Monitor - {self.selected_timeframe_label} - {message}")
