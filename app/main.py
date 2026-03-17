@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import ttk
@@ -10,15 +11,20 @@ from tkinter import ttk
 import MetaTrader5 as mt5
 
 
+UPDATE_INTERVAL_MS = 500
+SYMBOL_COLUMNS = (
+    ("USDJPYm", "EURUSDm", "JP225m", "USOILm"),
+    ("XAUUSDm", "XAGUSDm", "BTCUSDm", "ETHUSDm"),
+)
+ALL_SYMBOLS = tuple(symbol for column in SYMBOL_COLUMNS for symbol in column)
+
+
 @dataclass(frozen=True)
-class AccountSnapshot:
-    login: int
-    server: str
-    balance: float
-    equity: float
-    profit: float
-    currency: str
-    terminal_path: str
+class RateSnapshot:
+    symbol: str
+    bid: float
+    ask: float
+    digits: int
 
 
 DEFAULT_TERMINAL_CANDIDATES = (
@@ -42,172 +48,208 @@ def find_terminal_path() -> str | None:
     return None
 
 
-def fetch_account_snapshot() -> AccountSnapshot:
+def initialize_mt5() -> None:
     terminal_path = find_terminal_path()
-
-    if terminal_path:
-        initialized = mt5.initialize(path=terminal_path)
-    else:
-        initialized = mt5.initialize()
+    initialized = mt5.initialize(path=terminal_path) if terminal_path else mt5.initialize()
 
     if not initialized:
         code, message = mt5.last_error()
-        raise RuntimeError(f"MT5 initialize failed: [{code}] {message}")
+        raise RuntimeError(f"MT5 に接続できません: [{code}] {message}")
 
-    try:
-        info = mt5.account_info()
-        if info is None:
+    for symbol in ALL_SYMBOLS:
+        if not mt5.symbol_select(symbol, True):
             code, message = mt5.last_error()
-            raise RuntimeError(f"MT5 account_info failed: [{code}] {message}")
+            raise RuntimeError(f"{symbol} を表示対象にできません: [{code}] {message}")
 
-        return AccountSnapshot(
-            login=info.login,
-            server=info.server,
-            balance=info.balance,
-            equity=info.equity,
-            profit=info.profit,
-            currency=info.currency,
-            terminal_path=terminal_path or "auto-detect",
+
+def fetch_rates() -> dict[str, RateSnapshot]:
+    snapshots: dict[str, RateSnapshot] = {}
+
+    for symbol in ALL_SYMBOLS:
+        info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+
+        if info is None or tick is None:
+            code, message = mt5.last_error()
+            raise RuntimeError(f"{symbol} の値段を取得できません: [{code}] {message}")
+
+        snapshots[symbol] = RateSnapshot(
+            symbol=symbol,
+            bid=tick.bid,
+            ask=tick.ask,
+            digits=info.digits,
         )
-    finally:
-        mt5.shutdown()
+
+    return snapshots
 
 
-class MT5BalanceApp:
+def format_price(value: float, digits: int) -> str:
+    normalized_digits = digits if digits >= 0 else 0
+    return f"{value:,.{normalized_digits}f}"
+
+
+class MT5RateMonitorApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("MT5 Balance Viewer")
-        self.root.geometry("560x320")
-        self.root.minsize(520, 300)
+        self.root.title("MT5 Rate Monitor")
+        self.root.geometry("860x620")
+        self.root.minsize(760, 560)
+        self.root.configure(bg="#eef2f6")
 
-        self.balance_var = tk.StringVar(value="--")
-        self.currency_var = tk.StringVar(value="")
-        self.login_var = tk.StringVar(value="--")
-        self.server_var = tk.StringVar(value="--")
-        self.equity_var = tk.StringVar(value="--")
-        self.profit_var = tk.StringVar(value="--")
-        self.path_var = tk.StringVar(value=find_terminal_path() or "auto-detect")
         self.status_var = tk.StringVar(value="接続待機中")
+        self.quote_vars = {
+            symbol: {
+                "bid": tk.StringVar(value="--"),
+                "ask": tk.StringVar(value="--"),
+            }
+            for symbol in ALL_SYMBOLS
+        }
+        self.stop_event = threading.Event()
+        self.closing = False
 
         self._build_ui()
-        self.refresh_balance()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._start_monitor()
 
     def _build_ui(self) -> None:
-        self.root.configure(bg="#f3f5f7")
-
         style = ttk.Style()
         style.theme_use("clam")
+        style.configure("Page.TFrame", background="#eef2f6")
         style.configure("Card.TFrame", background="#ffffff")
-        style.configure("Body.TLabel", background="#ffffff", foreground="#1f2937")
-        style.configure("Muted.TLabel", background="#ffffff", foreground="#6b7280")
-        style.configure("Balance.TLabel", background="#ffffff", foreground="#0f172a")
-        style.configure("Refresh.TButton", padding=(14, 8))
+        style.configure("Tile.TFrame", background="#f8fafc")
+        style.configure("Headline.TLabel", background="#ffffff", foreground="#0f172a")
+        style.configure("Muted.TLabel", background="#ffffff", foreground="#64748b")
+        style.configure("TileSymbol.TLabel", background="#f8fafc", foreground="#0f172a")
+        style.configure("TileKey.TLabel", background="#f8fafc", foreground="#64748b")
+        style.configure("TileValue.TLabel", background="#f8fafc", foreground="#111827")
 
-        outer = ttk.Frame(self.root, padding=20)
+        outer = ttk.Frame(self.root, style="Page.TFrame", padding=20)
         outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
 
-        card = ttk.Frame(outer, style="Card.TFrame", padding=24)
-        card.pack(fill="both", expand=True)
-
-        ttk.Label(card, text="MT5 口座残高", style="Muted.TLabel", font=("Yu Gothic UI", 12)).pack(anchor="w")
-
-        balance_row = ttk.Frame(card, style="Card.TFrame")
-        balance_row.pack(fill="x", pady=(8, 20))
+        header = ttk.Frame(outer, style="Card.TFrame", padding=20)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 16))
+        header.columnconfigure(0, weight=1)
 
         ttk.Label(
-            balance_row,
-            textvariable=self.balance_var,
-            style="Balance.TLabel",
-            font=("Yu Gothic UI Semibold", 30),
-        ).pack(side="left")
+            header,
+            text="MT5 監視銘柄",
+            style="Headline.TLabel",
+            font=("Yu Gothic UI Semibold", 20),
+        ).grid(row=0, column=0, sticky="w")
         ttk.Label(
-            balance_row,
-            textvariable=self.currency_var,
+            header,
+            text="0.5秒ごとに売値と買値を更新",
             style="Muted.TLabel",
-            font=("Yu Gothic UI", 14),
-            padding=(12, 10, 0, 0),
-        ).pack(side="left")
+            font=("Yu Gothic UI", 10),
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(
+            header,
+            textvariable=self.status_var,
+            style="Muted.TLabel",
+            font=("Yu Gothic UI", 10),
+        ).grid(row=2, column=0, sticky="w", pady=(10, 0))
 
-        details = ttk.Frame(card, style="Card.TFrame")
-        details.pack(fill="x")
-        details.columnconfigure(1, weight=1)
+        content = ttk.Frame(outer, style="Page.TFrame")
+        content.grid(row=1, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.columnconfigure(1, weight=1)
 
-        rows = (
-            ("ログインID", self.login_var),
-            ("サーバー", self.server_var),
-            ("有効証拠金", self.equity_var),
-            ("評価損益", self.profit_var),
-            ("ターミナル", self.path_var),
-        )
-
-        for row_index, (label, variable) in enumerate(rows):
-            ttk.Label(details, text=label, style="Muted.TLabel", font=("Yu Gothic UI", 10)).grid(
-                row=row_index,
-                column=0,
-                sticky="nw",
-                padx=(0, 16),
-                pady=4,
+        for column_index, symbols in enumerate(SYMBOL_COLUMNS):
+            column_frame = ttk.Frame(content, style="Page.TFrame")
+            column_frame.grid(
+                row=0,
+                column=column_index,
+                sticky="nsew",
+                padx=(0, 10) if column_index == 0 else (10, 0),
             )
-            ttk.Label(
-                details,
-                textvariable=variable,
-                style="Body.TLabel",
-                font=("Consolas", 10) if label == "ターミナル" else ("Yu Gothic UI", 10),
-                wraplength=360,
-                justify="left",
-            ).grid(row=row_index, column=1, sticky="w", pady=4)
+            column_frame.columnconfigure(0, weight=1)
 
-        footer = ttk.Frame(card, style="Card.TFrame")
-        footer.pack(fill="x", side="bottom", pady=(24, 0))
-        footer.columnconfigure(0, weight=1)
+            for row_index, symbol in enumerate(symbols):
+                tile = ttk.Frame(column_frame, style="Tile.TFrame", padding=18)
+                tile.grid(row=row_index, column=0, sticky="ew", pady=(0, 14))
+                tile.columnconfigure(1, weight=1)
 
-        ttk.Label(footer, textvariable=self.status_var, style="Muted.TLabel", font=("Yu Gothic UI", 10)).grid(
-            row=0,
-            column=0,
-            sticky="w",
-        )
-        ttk.Button(
-            footer,
-            text="再読み込み",
-            command=self.refresh_balance,
-            style="Refresh.TButton",
-        ).grid(row=0, column=1, sticky="e")
+                ttk.Label(
+                    tile,
+                    text=symbol,
+                    style="TileSymbol.TLabel",
+                    font=("Yu Gothic UI Semibold", 14),
+                ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+                ttk.Label(
+                    tile,
+                    text="売値",
+                    style="TileKey.TLabel",
+                    font=("Yu Gothic UI", 10),
+                ).grid(row=1, column=0, sticky="w")
+                ttk.Label(
+                    tile,
+                    textvariable=self.quote_vars[symbol]["bid"],
+                    style="TileValue.TLabel",
+                    font=("Consolas", 16),
+                ).grid(row=1, column=1, sticky="e")
+                ttk.Label(
+                    tile,
+                    text="買値",
+                    style="TileKey.TLabel",
+                    font=("Yu Gothic UI", 10),
+                ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+                ttk.Label(
+                    tile,
+                    textvariable=self.quote_vars[symbol]["ask"],
+                    style="TileValue.TLabel",
+                    font=("Consolas", 16),
+                ).grid(row=2, column=1, sticky="e", pady=(8, 0))
 
-    def refresh_balance(self) -> None:
+    def _start_monitor(self) -> None:
         self.status_var.set("MT5 に接続中...")
-        thread = threading.Thread(target=self._refresh_worker, daemon=True)
+        thread = threading.Thread(target=self._monitor_loop, daemon=True)
         thread.start()
 
-    def _refresh_worker(self) -> None:
+    def _monitor_loop(self) -> None:
         try:
-            snapshot = fetch_account_snapshot()
-            self.root.after(0, lambda: self._apply_snapshot(snapshot))
-        except Exception as exc:  # pragma: no cover
-            self.root.after(0, lambda: self._apply_error(str(exc)))
+            initialize_mt5()
+            self._call_on_main_thread(lambda: self.status_var.set("接続済み"))
 
-    def _apply_snapshot(self, snapshot: AccountSnapshot) -> None:
-        self.balance_var.set(f"{snapshot.balance:,.2f}")
-        self.currency_var.set(snapshot.currency)
-        self.login_var.set(str(snapshot.login))
-        self.server_var.set(snapshot.server)
-        self.equity_var.set(f"{snapshot.equity:,.2f} {snapshot.currency}")
-        self.profit_var.set(f"{snapshot.profit:,.2f} {snapshot.currency}")
-        self.path_var.set(snapshot.terminal_path)
-        self.status_var.set("接続済み")
+            while not self.stop_event.is_set():
+                snapshots = fetch_rates()
+                self._call_on_main_thread(lambda data=snapshots: self._apply_rates(data))
+                self.stop_event.wait(UPDATE_INTERVAL_MS / 1000)
+        except Exception as exc:  # pragma: no cover
+            self._call_on_main_thread(lambda message=str(exc): self._apply_error(message))
+        finally:
+            mt5.shutdown()
+
+    def _apply_rates(self, snapshots: dict[str, RateSnapshot]) -> None:
+        for symbol, snapshot in snapshots.items():
+            self.quote_vars[symbol]["bid"].set(format_price(snapshot.bid, snapshot.digits))
+            self.quote_vars[symbol]["ask"].set(format_price(snapshot.ask, snapshot.digits))
 
     def _apply_error(self, message: str) -> None:
-        self.balance_var.set("--")
-        self.currency_var.set("")
-        self.login_var.set("--")
-        self.server_var.set("--")
-        self.equity_var.set("--")
-        self.profit_var.set("--")
+        for symbol in ALL_SYMBOLS:
+            self.quote_vars[symbol]["bid"].set("--")
+            self.quote_vars[symbol]["ask"].set("--")
         self.status_var.set(message)
+
+    def _call_on_main_thread(self, callback: Callable[[], None]) -> None:
+        if self.closing:
+            return
+
+        try:
+            self.root.after(0, callback)
+        except RuntimeError:
+            pass
+
+    def _on_close(self) -> None:
+        self.closing = True
+        self.stop_event.set()
+        self.root.destroy()
 
 
 def main() -> None:
     root = tk.Tk()
-    MT5BalanceApp(root)
+    MT5RateMonitorApp(root)
     root.mainloop()
 
 
