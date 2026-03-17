@@ -13,6 +13,16 @@ import MetaTrader5 as mt5
 
 UPDATE_INTERVAL_MS = 500
 CHART_BAR_COUNT = 30
+TIMEFRAME_OPTIONS = (
+    ("1分", mt5.TIMEFRAME_M1, "1分足"),
+    ("5分", mt5.TIMEFRAME_M5, "5分足"),
+    ("15分", mt5.TIMEFRAME_M15, "15分足"),
+    ("30分", mt5.TIMEFRAME_M30, "30分足"),
+    ("1時間", mt5.TIMEFRAME_H1, "1時間足"),
+    ("4時間", mt5.TIMEFRAME_H4, "4時間足"),
+    ("日足", mt5.TIMEFRAME_D1, "日足"),
+)
+DEFAULT_TIMEFRAME_LABEL = "1分"
 SYMBOL_ROWS = (
     ("USDJPYm", "EURUSDm", "JP225m", "USOILm"),
     ("XAUUSDm", "XAGUSDm", "BTCUSDm", "ETHUSDm"),
@@ -72,13 +82,13 @@ def initialize_mt5() -> None:
             raise RuntimeError(f"{symbol} を表示対象にできません: [{code}] {message}")
 
 
-def fetch_snapshots() -> dict[str, SymbolSnapshot]:
+def fetch_snapshots(timeframe_code: int) -> dict[str, SymbolSnapshot]:
     snapshots: dict[str, SymbolSnapshot] = {}
 
     for symbol in ALL_SYMBOLS:
         info = mt5.symbol_info(symbol)
         tick = mt5.symbol_info_tick(symbol)
-        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, CHART_BAR_COUNT)
+        rates = mt5.copy_rates_from_pos(symbol, timeframe_code, 0, CHART_BAR_COUNT)
 
         if info is None or tick is None or rates is None or len(rates) == 0:
             code, message = mt5.last_error()
@@ -132,6 +142,10 @@ class MT5RateMonitorApp:
             }
             for symbol in ALL_SYMBOLS
         }
+        self.timeframe_label_var = tk.StringVar(value="1分足")
+        self.selected_timeframe_label = DEFAULT_TIMEFRAME_LABEL
+        self.selected_timeframe_code = self._get_timeframe_code(DEFAULT_TIMEFRAME_LABEL)
+        self.timeframe_buttons: dict[str, ttk.Button] = {}
         self.chart_canvases: dict[str, tk.Canvas] = {}
         self.stop_event = threading.Event()
         self.closing = False
@@ -149,14 +163,30 @@ class MT5RateMonitorApp:
         style.configure("TileSub.TLabel", background="#f8fafc", foreground="#64748b")
         style.configure("BidHero.TLabel", background="#f8fafc", foreground="#0f9d58")
         style.configure("AskHero.TLabel", background="#f8fafc", foreground="#d93025")
+        style.configure("Toolbar.TFrame", background="#eef2f6")
+        style.configure("TimeButton.TButton", padding=(8, 4), font=("Yu Gothic UI", 9))
+        style.configure("TimeButtonActive.TButton", padding=(8, 4), font=("Yu Gothic UI Semibold", 9))
 
         outer = ttk.Frame(self.root, style="Page.TFrame", padding=16)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
+
+        toolbar = ttk.Frame(outer, style="Toolbar.TFrame")
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        for index, (label, _, __) in enumerate(TIMEFRAME_OPTIONS):
+            button = ttk.Button(
+                toolbar,
+                text=label,
+                command=lambda value=label: self._change_timeframe(value),
+                style="TimeButton.TButton",
+            )
+            button.grid(row=0, column=index, padx=(0, 6))
+            self.timeframe_buttons[label] = button
+        self._refresh_timeframe_buttons()
 
         content = ttk.Frame(outer, style="Page.TFrame")
-        content.grid(row=0, column=0, sticky="nsew")
+        content.grid(row=1, column=0, sticky="nsew")
         for column_index in range(4):
             content.columnconfigure(column_index, weight=1)
         for row_index in range(2):
@@ -199,7 +229,7 @@ class MT5RateMonitorApp:
                 ).grid(row=0, column=1, sticky="e", padx=(0, 10))
                 ttk.Label(
                     header_right,
-                    text="１分足",
+                    textvariable=self.timeframe_label_var,
                     style="TileSub.TLabel",
                     font=("Yu Gothic UI", 7),
                 ).grid(row=0, column=2, sticky="e")
@@ -227,7 +257,8 @@ class MT5RateMonitorApp:
             self._call_on_main_thread(lambda: self._set_window_title("接続済み"))
 
             while not self.stop_event.is_set():
-                snapshots = fetch_snapshots()
+                timeframe_code = self.selected_timeframe_code
+                snapshots = fetch_snapshots(timeframe_code)
                 self._call_on_main_thread(lambda data=snapshots: self._apply_rates(data))
                 self.stop_event.wait(UPDATE_INTERVAL_MS / 1000)
         except Exception as exc:  # pragma: no cover
@@ -244,6 +275,7 @@ class MT5RateMonitorApp:
             self.header_quote_vars[symbol]["bid"].set(f"BID {bid_text}")
             self.header_quote_vars[symbol]["ask"].set(f"ASK {ask_text}")
             self._draw_chart(self.chart_canvases[symbol], snapshot.bars)
+        self._set_window_title("接続済み")
 
     def _apply_error(self, message: str) -> None:
         for symbol in ALL_SYMBOLS:
@@ -326,7 +358,31 @@ class MT5RateMonitorApp:
             )
 
     def _set_window_title(self, message: str) -> None:
-        self.root.title(f"MT5 Rate Monitor - {message}")
+        self.root.title(f"MT5 Rate Monitor - {self.selected_timeframe_label} - {message}")
+
+    def _get_timeframe_code(self, label: str) -> int:
+        for timeframe_label, timeframe_code, _ in TIMEFRAME_OPTIONS:
+            if timeframe_label == label:
+                return timeframe_code
+        raise ValueError(f"未対応の時間足です: {label}")
+
+    def _get_timeframe_display(self, label: str) -> str:
+        for timeframe_label, _, timeframe_display in TIMEFRAME_OPTIONS:
+            if timeframe_label == label:
+                return timeframe_display
+        raise ValueError(f"未対応の時間足です: {label}")
+
+    def _change_timeframe(self, label: str) -> None:
+        self.selected_timeframe_label = label
+        self.selected_timeframe_code = self._get_timeframe_code(label)
+        self.timeframe_label_var.set(self._get_timeframe_display(label))
+        self._refresh_timeframe_buttons()
+        self._set_window_title("更新中")
+
+    def _refresh_timeframe_buttons(self) -> None:
+        for label, button in self.timeframe_buttons.items():
+            style_name = "TimeButtonActive.TButton" if label == self.selected_timeframe_label else "TimeButton.TButton"
+            button.configure(style=style_name)
 
     def _call_on_main_thread(self, callback: Callable[[], None]) -> None:
         if self.closing:
