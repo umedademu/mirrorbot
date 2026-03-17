@@ -5,6 +5,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from tkinter import ttk
 
@@ -60,6 +61,26 @@ class SymbolSnapshot:
     ask: float
     digits: int
     bars: tuple[CandleBar, ...]
+
+
+@dataclass(frozen=True)
+class PositionSnapshot:
+    symbol: str
+    ticket: str
+    time_text: str
+    trade_type: str
+    volume: str
+    price_open: str
+    sl: str
+    tp: str
+    price_current: str
+    swap: str
+    profit: str
+
+
+@dataclass(frozen=True)
+class AccountSnapshot:
+    summary_text: str
 
 
 DEFAULT_TERMINAL_CANDIDATES = (
@@ -130,6 +151,51 @@ def fetch_snapshots(timeframe_code: int) -> dict[str, SymbolSnapshot]:
     return snapshots
 
 
+def fetch_positions_and_account() -> tuple[tuple[PositionSnapshot, ...], AccountSnapshot]:
+    account_info = mt5.account_info()
+    if account_info is None:
+        code, message = mt5.last_error()
+        raise RuntimeError(f"口座情報を取得できません: [{code}] {message}")
+
+    positions_raw = mt5.positions_get()
+    if positions_raw is None:
+        code, message = mt5.last_error()
+        if code != 1:
+            raise RuntimeError(f"ポジション情報を取得できません: [{code}] {message}")
+        positions_raw = ()
+
+    positions: list[PositionSnapshot] = []
+    for position in positions_raw:
+        symbol_info = mt5.symbol_info(position.symbol)
+        digits = symbol_info.digits if symbol_info is not None else 2
+        time_text = datetime.fromtimestamp(position.time).strftime("%Y.%m.%d %H:%M:%S")
+        trade_type = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
+        positions.append(
+            PositionSnapshot(
+                symbol=position.symbol,
+                ticket=str(position.ticket),
+                time_text=time_text,
+                trade_type=trade_type,
+                volume=f"{position.volume:g}",
+                price_open=format_price(position.price_open, digits),
+                sl=format_price(position.sl, digits),
+                tp=format_price(position.tp, digits),
+                price_current=format_price(position.price_current, digits),
+                swap=f"{position.swap:,.2f}",
+                profit=f"{position.profit:,.2f}",
+            )
+        )
+
+    summary_text = (
+        f"残高: {account_info.balance:,.2f} {account_info.currency}    "
+        f"有効証拠金: {account_info.equity:,.2f}    "
+        f"必要証拠金: {account_info.margin:,.2f}    "
+        f"余剰証拠金: {account_info.margin_free:,.2f}    "
+        f"証拠金維持率: {account_info.margin_level:,.2f} %"
+    )
+    return tuple(positions), AccountSnapshot(summary_text=summary_text)
+
+
 def format_price(value: float, digits: int) -> str:
     normalized_digits = digits if digits >= 0 else 0
     return f"{value:,.{normalized_digits}f}"
@@ -160,8 +226,10 @@ class MT5RateMonitorApp:
         self.timeframe_label_var = tk.StringVar(value="1分足")
         self.selected_timeframe_label = DEFAULT_TIMEFRAME_LABEL
         self.selected_timeframe_code = self._get_timeframe_code(DEFAULT_TIMEFRAME_LABEL)
+        self.account_summary_var = tk.StringVar(value="残高: --    有効証拠金: --    必要証拠金: --    余剰証拠金: --    証拠金維持率: --")
         self.timeframe_buttons: dict[str, ttk.Button] = {}
         self.chart_canvases: dict[str, tk.Canvas] = {}
+        self.positions_tree: ttk.Treeview | None = None
         self.stop_event = threading.Event()
         self.closing = False
 
@@ -178,7 +246,38 @@ class MT5RateMonitorApp:
         style.configure("TileSub.TLabel", background=TILE_BG, foreground=TEXT_SOFT)
         style.configure("BidHero.TLabel", background=TILE_BG, foreground=BID_COLOR)
         style.configure("AskHero.TLabel", background=TILE_BG, foreground=ASK_COLOR)
+        style.configure("Bottom.TFrame", background=TILE_BG)
+        style.configure("Summary.TLabel", background=TILE_BG, foreground=TEXT_MAIN)
         style.configure("Toolbar.TFrame", background=PAGE_BG)
+        style.configure(
+            "Positions.Treeview",
+            background=TILE_BG,
+            fieldbackground=TILE_BG,
+            foreground=TEXT_MAIN,
+            rowheight=24,
+            bordercolor=TILE_EDGE,
+            lightcolor=TILE_EDGE,
+            darkcolor=TILE_EDGE,
+        )
+        style.configure(
+            "Positions.Treeview.Heading",
+            background=BUTTON_BG,
+            foreground=TEXT_MAIN,
+            bordercolor=TILE_EDGE,
+            lightcolor=BUTTON_BG,
+            darkcolor=BUTTON_BG,
+            font=("Yu Gothic UI Semibold", 9),
+        )
+        style.map(
+            "Positions.Treeview",
+            background=[("selected", "#22334f")],
+            foreground=[("selected", "#ffffff")],
+        )
+        style.map(
+            "Positions.Treeview.Heading",
+            background=[("active", "#1d2d46")],
+            foreground=[("active", "#ffffff")],
+        )
         style.configure(
             "TimeButton.TButton",
             padding=(10, 5),
@@ -214,6 +313,7 @@ class MT5RateMonitorApp:
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(1, weight=1)
+        outer.rowconfigure(2, weight=0)
 
         toolbar = ttk.Frame(outer, style="Toolbar.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -289,6 +389,61 @@ class MT5RateMonitorApp:
                 canvas.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 6))
                 self.chart_canvases[symbol] = canvas
 
+        bottom = ttk.Frame(outer, style="Bottom.TFrame", padding=10)
+        bottom.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        bottom.columnconfigure(0, weight=1)
+
+        columns = (
+            "symbol",
+            "ticket",
+            "time",
+            "type",
+            "volume",
+            "price_open",
+            "sl",
+            "tp",
+            "price_current",
+            "swap",
+            "profit",
+        )
+        tree = ttk.Treeview(
+            bottom,
+            columns=columns,
+            show="headings",
+            height=5,
+            style="Positions.Treeview",
+        )
+        tree.grid(row=0, column=0, sticky="ew")
+        self.positions_tree = tree
+
+        headings = (
+            ("symbol", "銘柄", 110, "w"),
+            ("ticket", "チケット", 110, "w"),
+            ("time", "時間", 170, "w"),
+            ("type", "タイプ", 70, "center"),
+            ("volume", "数量", 60, "e"),
+            ("price_open", "価格", 95, "e"),
+            ("sl", "決済逆指値(S/L)", 120, "e"),
+            ("tp", "決済指値(T/P)", 120, "e"),
+            ("price_current", "価格", 95, "e"),
+            ("swap", "スワップ", 80, "e"),
+            ("profit", "損益", 80, "e"),
+        )
+        for column_id, heading_text, width, anchor in headings:
+            tree.heading(column_id, text=heading_text, anchor=anchor)
+            tree.column(column_id, width=width, minwidth=width, anchor=anchor, stretch=True)
+
+        tree_scroll = ttk.Scrollbar(bottom, orient="horizontal", command=tree.xview)
+        tree_scroll.grid(row=1, column=0, sticky="ew")
+        tree.configure(xscrollcommand=tree_scroll.set)
+
+        ttk.Label(
+            bottom,
+            textvariable=self.account_summary_var,
+            style="Summary.TLabel",
+            font=("Yu Gothic UI Semibold", 10),
+        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+
     def _start_monitor(self) -> None:
         self._set_window_title("接続中")
         thread = threading.Thread(target=self._monitor_loop, daemon=True)
@@ -302,14 +457,26 @@ class MT5RateMonitorApp:
             while not self.stop_event.is_set():
                 timeframe_code = self.selected_timeframe_code
                 snapshots = fetch_snapshots(timeframe_code)
-                self._call_on_main_thread(lambda data=snapshots: self._apply_rates(data))
+                positions, account = fetch_positions_and_account()
+                self._call_on_main_thread(
+                    lambda data=snapshots, current_positions=positions, current_account=account: self._apply_terminal_state(
+                        data,
+                        current_positions,
+                        current_account,
+                    )
+                )
                 self.stop_event.wait(UPDATE_INTERVAL_MS / 1000)
         except Exception as exc:  # pragma: no cover
             self._call_on_main_thread(lambda message=str(exc): self._apply_error(message))
         finally:
             mt5.shutdown()
 
-    def _apply_rates(self, snapshots: dict[str, SymbolSnapshot]) -> None:
+    def _apply_terminal_state(
+        self,
+        snapshots: dict[str, SymbolSnapshot],
+        positions: tuple[PositionSnapshot, ...],
+        account: AccountSnapshot,
+    ) -> None:
         for symbol, snapshot in snapshots.items():
             bid_text = format_price(snapshot.bid, snapshot.digits)
             ask_text = format_price(snapshot.ask, snapshot.digits)
@@ -318,6 +485,8 @@ class MT5RateMonitorApp:
             self.header_quote_vars[symbol]["bid"].set(f"BID {bid_text}")
             self.header_quote_vars[symbol]["ask"].set(f"ASK {ask_text}")
             self._draw_chart(self.chart_canvases[symbol], snapshot.bars)
+        self._refresh_positions(positions)
+        self.account_summary_var.set(account.summary_text)
         self._set_window_title("接続済み")
 
     def _apply_error(self, message: str) -> None:
@@ -327,6 +496,8 @@ class MT5RateMonitorApp:
             self.header_quote_vars[symbol]["bid"].set("BID --")
             self.header_quote_vars[symbol]["ask"].set("ASK --")
             self.chart_canvases[symbol].delete("all")
+        self._refresh_positions(())
+        self.account_summary_var.set("残高: --    有効証拠金: --    必要証拠金: --    余剰証拠金: --    証拠金維持率: --")
         self._set_window_title(message)
 
     def _draw_chart(self, canvas: tk.Canvas, bars: tuple[CandleBar, ...]) -> None:
@@ -402,6 +573,30 @@ class MT5RateMonitorApp:
 
     def _set_window_title(self, message: str) -> None:
         self.root.title(f"MT5 Rate Monitor - {self.selected_timeframe_label} - {message}")
+
+    def _refresh_positions(self, positions: tuple[PositionSnapshot, ...]) -> None:
+        if self.positions_tree is None:
+            return
+
+        self.positions_tree.delete(*self.positions_tree.get_children())
+        for position in positions:
+            self.positions_tree.insert(
+                "",
+                "end",
+                values=(
+                    position.symbol,
+                    position.ticket,
+                    position.time_text,
+                    position.trade_type,
+                    position.volume,
+                    position.price_open,
+                    position.sl,
+                    position.tp,
+                    position.price_current,
+                    position.swap,
+                    position.profit,
+                ),
+            )
 
     def _get_timeframe_code(self, label: str) -> int:
         for timeframe_label, timeframe_code, _ in TIMEFRAME_OPTIONS:
