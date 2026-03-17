@@ -13,11 +13,11 @@ import MetaTrader5 as mt5
 
 UPDATE_INTERVAL_MS = 500
 CHART_BAR_COUNT = 30
-SYMBOL_COLUMNS = (
+SYMBOL_ROWS = (
     ("USDJPYm", "EURUSDm", "JP225m", "USOILm"),
     ("XAUUSDm", "XAGUSDm", "BTCUSDm", "ETHUSDm"),
 )
-ALL_SYMBOLS = tuple(symbol for column in SYMBOL_COLUMNS for symbol in column)
+ALL_SYMBOLS = tuple(symbol for row in SYMBOL_ROWS for symbol in row)
 
 
 @dataclass(frozen=True)
@@ -114,8 +114,8 @@ class MT5RateMonitorApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("MT5 Rate Monitor")
-        self.root.geometry("980x860")
-        self.root.minsize(900, 780)
+        self.root.geometry("1260x640")
+        self.root.minsize(1080, 560)
         self.root.configure(bg="#eef2f6")
 
         self.status_var = tk.StringVar(value="接続待機中")
@@ -147,52 +147,53 @@ class MT5RateMonitorApp:
         style.configure("TileValue.TLabel", background="#f8fafc", foreground="#111827")
         style.configure("TileSub.TLabel", background="#f8fafc", foreground="#64748b")
 
-        outer = ttk.Frame(self.root, style="Page.TFrame", padding=20)
+        outer = ttk.Frame(self.root, style="Page.TFrame", padding=16)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(outer, style="Card.TFrame", padding=20)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 16))
+        header = ttk.Frame(outer, style="Card.TFrame", padding=16)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         header.columnconfigure(0, weight=1)
 
         ttk.Label(
             header,
             text="MT5 監視銘柄",
             style="Headline.TLabel",
-            font=("Yu Gothic UI Semibold", 20),
+            font=("Yu Gothic UI Semibold", 18),
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="0.5秒ごとに売値と買値を更新し、各銘柄の１分足を表示",
+            text="売値と買値を更新し、各銘柄に１分足を表示",
             style="Muted.TLabel",
-            font=("Yu Gothic UI", 10),
+            font=("Yu Gothic UI", 9),
+            wraplength=520,
+            justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             header,
             textvariable=self.status_var,
             style="Muted.TLabel",
-            font=("Yu Gothic UI", 10),
-        ).grid(row=2, column=0, sticky="w", pady=(10, 0))
+            font=("Yu Gothic UI", 9),
+        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
         content = ttk.Frame(outer, style="Page.TFrame")
         content.grid(row=1, column=0, sticky="nsew")
-        content.columnconfigure(0, weight=1)
-        content.columnconfigure(1, weight=1)
+        for column_index in range(4):
+            content.columnconfigure(column_index, weight=1)
+        for row_index in range(2):
+            content.rowconfigure(row_index, weight=1)
 
-        for column_index, symbols in enumerate(SYMBOL_COLUMNS):
-            column_frame = ttk.Frame(content, style="Page.TFrame")
-            column_frame.grid(
-                row=0,
-                column=column_index,
-                sticky="nsew",
-                padx=(0, 10) if column_index == 0 else (10, 0),
-            )
-            column_frame.columnconfigure(0, weight=1)
-
-            for row_index, symbol in enumerate(symbols):
-                tile = ttk.Frame(column_frame, style="Tile.TFrame", padding=18)
-                tile.grid(row=row_index, column=0, sticky="ew", pady=(0, 14))
+        for row_index, symbols in enumerate(SYMBOL_ROWS):
+            for column_index, symbol in enumerate(symbols):
+                tile = ttk.Frame(content, style="Tile.TFrame", padding=12)
+                tile.grid(
+                    row=row_index,
+                    column=column_index,
+                    sticky="nsew",
+                    padx=5,
+                    pady=5,
+                )
                 tile.columnconfigure(1, weight=1)
                 tile.rowconfigure(1, weight=1)
 
@@ -200,50 +201,51 @@ class MT5RateMonitorApp:
                     tile,
                     text=symbol,
                     style="TileSymbol.TLabel",
-                    font=("Yu Gothic UI Semibold", 14),
-                ).grid(row=0, column=0, sticky="w", pady=(0, 10))
+                    font=("Yu Gothic UI Semibold", 12),
+                ).grid(row=0, column=0, sticky="w", pady=(0, 6))
                 ttk.Label(
                     tile,
                     text="１分足",
                     style="TileSub.TLabel",
-                    font=("Yu Gothic UI", 9),
-                ).grid(row=0, column=1, sticky="e", pady=(0, 10))
+                    font=("Yu Gothic UI", 8),
+                ).grid(row=0, column=1, sticky="e", pady=(0, 6))
 
                 canvas = tk.Canvas(
                     tile,
-                    height=92,
+                    width=210,
+                    height=64,
                     bg="#f8fafc",
                     bd=0,
                     highlightthickness=0,
                     relief="flat",
                 )
-                canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+                canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
                 self.chart_canvases[symbol] = canvas
 
                 ttk.Label(
                     tile,
                     text="売値",
                     style="TileKey.TLabel",
-                    font=("Yu Gothic UI", 10),
+                    font=("Yu Gothic UI", 8),
                 ).grid(row=2, column=0, sticky="w")
                 ttk.Label(
                     tile,
                     textvariable=self.quote_vars[symbol]["bid"],
                     style="TileValue.TLabel",
-                    font=("Consolas", 16),
+                    font=("Consolas", 12),
                 ).grid(row=2, column=1, sticky="e")
                 ttk.Label(
                     tile,
                     text="買値",
                     style="TileKey.TLabel",
-                    font=("Yu Gothic UI", 10),
-                ).grid(row=3, column=0, sticky="w", pady=(8, 0))
+                    font=("Yu Gothic UI", 8),
+                ).grid(row=3, column=0, sticky="w", pady=(4, 0))
                 ttk.Label(
                     tile,
                     textvariable=self.quote_vars[symbol]["ask"],
                     style="TileValue.TLabel",
-                    font=("Consolas", 16),
-                ).grid(row=3, column=1, sticky="e", pady=(8, 0))
+                    font=("Consolas", 12),
+                ).grid(row=3, column=1, sticky="e", pady=(4, 0))
 
     def _start_monitor(self) -> None:
         self.status_var.set("MT5 に接続中...")
@@ -278,12 +280,12 @@ class MT5RateMonitorApp:
         self.status_var.set(message)
 
     def _draw_chart(self, canvas: tk.Canvas, bars: tuple[CandleBar, ...]) -> None:
-        width = max(canvas.winfo_width(), 320)
-        height = max(canvas.winfo_height(), 92)
-        top_padding = 8
-        bottom_padding = 8
-        left_padding = 8
-        right_padding = 8
+        width = max(canvas.winfo_width(), 210)
+        height = max(canvas.winfo_height(), 64)
+        top_padding = 6
+        bottom_padding = 6
+        left_padding = 6
+        right_padding = 6
 
         canvas.delete("all")
         canvas.create_rectangle(0, 0, width, height, fill="#f8fafc", outline="")
