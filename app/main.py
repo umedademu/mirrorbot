@@ -13,6 +13,21 @@ import MetaTrader5 as mt5
 
 UPDATE_INTERVAL_MS = 500
 CHART_BAR_COUNT = 30
+PAGE_BG = "#0b1220"
+TILE_BG = "#131c2e"
+TILE_EDGE = "#21304a"
+TEXT_MAIN = "#dbe7ff"
+TEXT_SOFT = "#90a4c7"
+GRID_LINE = "#2a3b58"
+BUTTON_BG = "#162237"
+BUTTON_ACTIVE_BG = "#28456e"
+BUTTON_TEXT = "#d7e5ff"
+BID_COLOR = "#39d98a"
+ASK_COLOR = "#ff7a70"
+BULL_LINE = "#3bd68c"
+BEAR_LINE = "#ff6b5f"
+BULL_FILL = "#1f8f66"
+BEAR_FILL = "#9f3f39"
 TIMEFRAME_OPTIONS = (
     ("1分", mt5.TIMEFRAME_M1, "1分足"),
     ("5分", mt5.TIMEFRAME_M5, "5分足"),
@@ -126,7 +141,7 @@ class MT5RateMonitorApp:
         self.root.title("MT5 Rate Monitor")
         self.root.geometry("1260x640")
         self.root.minsize(1080, 560)
-        self.root.configure(bg="#eef2f6")
+        self.root.configure(bg=PAGE_BG)
 
         self.quote_vars = {
             symbol: {
@@ -157,15 +172,43 @@ class MT5RateMonitorApp:
     def _build_ui(self) -> None:
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("Page.TFrame", background="#eef2f6")
-        style.configure("Tile.TFrame", background="#f8fafc")
-        style.configure("TileSymbol.TLabel", background="#f8fafc", foreground="#0f172a")
-        style.configure("TileSub.TLabel", background="#f8fafc", foreground="#64748b")
-        style.configure("BidHero.TLabel", background="#f8fafc", foreground="#0f9d58")
-        style.configure("AskHero.TLabel", background="#f8fafc", foreground="#d93025")
-        style.configure("Toolbar.TFrame", background="#eef2f6")
-        style.configure("TimeButton.TButton", padding=(8, 4), font=("Yu Gothic UI", 9))
-        style.configure("TimeButtonActive.TButton", padding=(8, 4), font=("Yu Gothic UI Semibold", 9))
+        style.configure("Page.TFrame", background=PAGE_BG)
+        style.configure("Tile.TFrame", background=TILE_BG, relief="flat")
+        style.configure("TileSymbol.TLabel", background=TILE_BG, foreground=TEXT_SOFT)
+        style.configure("TileSub.TLabel", background=TILE_BG, foreground=TEXT_SOFT)
+        style.configure("BidHero.TLabel", background=TILE_BG, foreground=BID_COLOR)
+        style.configure("AskHero.TLabel", background=TILE_BG, foreground=ASK_COLOR)
+        style.configure("Toolbar.TFrame", background=PAGE_BG)
+        style.configure(
+            "TimeButton.TButton",
+            padding=(10, 5),
+            font=("Yu Gothic UI", 9),
+            background=BUTTON_BG,
+            foreground=BUTTON_TEXT,
+            bordercolor=TILE_EDGE,
+            lightcolor=BUTTON_BG,
+            darkcolor=BUTTON_BG,
+        )
+        style.map(
+            "TimeButton.TButton",
+            background=[("active", "#1d2d46"), ("pressed", "#20324f")],
+            foreground=[("active", "#ffffff"), ("pressed", "#ffffff")],
+        )
+        style.configure(
+            "TimeButtonActive.TButton",
+            padding=(10, 5),
+            font=("Yu Gothic UI Semibold", 9),
+            background=BUTTON_ACTIVE_BG,
+            foreground="#ffffff",
+            bordercolor="#4678b8",
+            lightcolor=BUTTON_ACTIVE_BG,
+            darkcolor=BUTTON_ACTIVE_BG,
+        )
+        style.map(
+            "TimeButtonActive.TButton",
+            background=[("active", "#31588d"), ("pressed", "#2b4e7e")],
+            foreground=[("active", "#ffffff"), ("pressed", "#ffffff")],
+        )
 
         outer = ttk.Frame(self.root, style="Page.TFrame", padding=16)
         outer.pack(fill="both", expand=True)
@@ -238,7 +281,7 @@ class MT5RateMonitorApp:
                     tile,
                     width=210,
                     height=136,
-                    bg="#f8fafc",
+                    bg=TILE_BG,
                     bd=0,
                     highlightthickness=0,
                     relief="flat",
@@ -295,7 +338,7 @@ class MT5RateMonitorApp:
         right_padding = 4
 
         canvas.delete("all")
-        canvas.create_rectangle(0, 0, width, height, fill="#f8fafc", outline="")
+        canvas.create_rectangle(0, 0, width, height, fill=TILE_BG, outline="")
 
         if not bars:
             return
@@ -318,7 +361,7 @@ class MT5RateMonitorApp:
 
         for guide_ratio in (0.25, 0.5, 0.75):
             y = top_padding + chart_height * guide_ratio
-            canvas.create_line(left_padding, y, width - right_padding, y, fill="#d7dee7")
+            canvas.create_line(left_padding, y, width - right_padding, y, fill=GRID_LINE)
 
         for index, bar in enumerate(bars):
             center_x = left_padding + (index + 0.5) * candle_space
@@ -328,8 +371,8 @@ class MT5RateMonitorApp:
             close_y = to_y(bar.close)
 
             is_up = bar.close >= bar.open
-            line_color = "#0f9d58" if is_up else "#d93025"
-            body_color = "#8ad2aa" if is_up else "#f2a8a0"
+            line_color = BULL_LINE if is_up else BEAR_LINE
+            body_color = BULL_FILL if is_up else BEAR_FILL
 
             canvas.create_line(center_x, high_y, center_x, low_y, fill=line_color, width=1)
 
