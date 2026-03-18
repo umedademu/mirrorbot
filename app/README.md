@@ -38,6 +38,7 @@ python main.py
 - OpenClaw の 20 分実行を登録するには、ルートで `python app\setup_openclaw_cron.py` を実行します
 - OpenClaw からの受け取りは `app\runtime\openclaw\signal_inbox.jsonl` に追記されます
 - mirrorbot の取引台帳は `app\runtime\mirrorbot.db` に保存されます
+- OpenClaw の X 巡回は BrowserRelay の 1 タブだけを使い、4 アカウントを順番に見に行きます
 - OpenClaw の各回の分析結果は Discord の `ミラトレbot` チャンネルにも送られます
 - 自動売買の初期状態は停止です
 - 画面右上のボタンで開始と停止を切り替えられます

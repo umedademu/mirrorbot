@@ -3,6 +3,7 @@ OpenClaw と mirrorbot の連携メモ
 目的
 
 - OpenClaw が 20 分ごとに X を見て、上目線と下目線の発言だけを mirrorbot に渡す
+- OpenClaw の X 巡回は BrowserRelay の 1 タブだけを使い、4 アカウントを順番に確認する
 - mirrorbot はその受け取りに反応して MT5 へ発注する
 - 取引の出入りは SQLite に残し、OpenClaw からの受け取りは jsonl で受ける
 
@@ -10,7 +11,7 @@ OpenClaw と mirrorbot の連携メモ
 
 - OpenClaw 側
   - `~/.openclaw/cron/jobs.json` に `mirrorbot-x-watch` を登録
-  - 20 分ごとに BrowserRelay を使って指定 4 アカウントを確認
+  - 20 分ごとに BrowserRelay を使い、1 タブだけで指定 4 アカウントを順番に確認
   - 結果を `C:\Users\user\Desktop\mirrorbot\app\runtime\openclaw\signal_batch.json` に JSON 配列で保存
   - そのあと `app/openclaw_signal_ingest.py` を呼び、`signal_inbox.jsonl` に追記
   - 毎回の分析結果を Discord の `ミラトレbot` チャンネルへ送る

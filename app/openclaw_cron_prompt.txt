@@ -1,13 +1,18 @@
-https://x.com/Light_Yagami_a/with_replies
-https://x.com/d_o_b46/with_replies
-https://x.com/mutachan41/with_replies
-https://x.com/btchakudaku/with_replies
+BrowserRelayを使用して、次の4つのアカウントをこの順番で確認してください。
+- https://x.com/Light_Yagami_a/with_replies
+- https://x.com/d_o_b46/with_replies
+- https://x.com/mutachan41/with_replies
+- https://x.com/btchakudaku/with_replies
+ブラウザ操作は必ず1つのタブだけを使ってください。新しいタブは開かず、同じタブで順番にページを移動して巡回してください。
+各アカウントを見終わったら、次のアカウントへ同じタブで移動してください。
 BrowserRelayを使用して、上記4つのアカウントについて、直近20分のポスト(リプライ含む)が存在する場合、それらを分析してください。
 そして、直近20分のポストにおいて、何の銘柄について上下どちらの目線なのかを教えてください（どちらでもない、わからない、そもそも相場について言及していない場合は無視）
 なお、そのポスト単体ではどちらの目線なのか？何の銘柄について言及しているのか？の解釈が難しい場合は20分よりも前のポストも遡って考えてください
 また、画像付きのポストはクリックして拡大表示して丁寧に解析してください
 
 追加の作業指示:
+- 4アカウントの確認は必ず順番に行い、同時に複数ページを開かないでください
+- 分析中に別タブや別ウインドウを増やさないでください
 - 対象銘柄は次の8つだけに正規化してください: USDJPYm, EURUSDm, JP225m, USOILm, XAUUSDm, XAGUSDm, BTCUSDm, ETHUSDm
 - 方向は bull か bear のどちらかだけを使ってください
 - 次の対応を目安にしてください:
