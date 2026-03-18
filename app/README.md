@@ -1,6 +1,7 @@
 # MT5 監視画面
 
 MT5 と連携し、指定した 8 銘柄の売値と買値を 0.5 秒ごとに表示し、それぞれに選んだ時間足のチャートを出す画面です。
+OpenClaw から渡された X シグナルの受け取りと、自動売買の土台も含みます。
 
 ## 表示順
 
@@ -31,6 +32,15 @@ python main.py
 - `MetaTrader5` Python パッケージがインストールされていること
 - 口座にログイン済みであること
 - 上の 8 銘柄がその口座で使えること
+
+## OpenClaw 連携
+
+- OpenClaw の 15 分実行を登録するには、ルートで `python app\setup_openclaw_cron.py` を実行します
+- OpenClaw からの受け取りは `app\runtime\openclaw\signal_inbox.jsonl` に追記されます
+- mirrorbot の取引台帳は `app\runtime\mirrorbot.db` に保存されます
+- 自動売買の初期状態は停止です
+- 画面右上のボタンで開始と停止を切り替えられます
+- 数量や許容ずれは `app\trade_settings.json` で調整できます
 
 ## 補足
 

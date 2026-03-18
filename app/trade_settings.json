@@ -1,0 +1,7 @@
+{
+  "auto_trade_enabled": false,
+  "default_volume": null,
+  "symbol_volumes": {},
+  "slippage_points": 30,
+  "magic_number": 42004201
+}

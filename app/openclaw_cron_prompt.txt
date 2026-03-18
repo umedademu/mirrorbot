@@ -1,0 +1,35 @@
+https://x.com/Light_Yagami_a/with_replies
+https://x.com/d_o_b46/with_replies
+https://x.com/mutachan41/with_replies
+https://x.com/btchakudaku/with_replies
+BrowserRelayを使用して、上記4つのアカウントについて、直近15分のポスト(リプライ含む)が存在する場合、それらを分析してください。
+そして、直近15分のポストにおいて、何の銘柄について上下どちらの目線なのかを教えてください（どちらでもない、わからない、そもそも相場について言及していない場合は無視）
+なお、そのポスト単体ではどちらの目線なのか？何の銘柄について言及しているのか？の解釈が難しい場合は15分よりも前のポストも遡って考えてください
+また、画像付きのポストはクリックして拡大表示して丁寧に解析してください
+
+追加の作業指示:
+- 対象銘柄は次の8つだけに正規化してください: USDJPYm, EURUSDm, JP225m, USOILm, XAUUSDm, XAGUSDm, BTCUSDm, ETHUSDm
+- 方向は bull か bear のどちらかだけを使ってください
+- 次の対応を目安にしてください:
+  - ドル円 -> USDJPYm
+  - ユーロドル -> EURUSDm
+  - 日経、日経225 -> JP225m
+  - 原油、WTI -> USOILm
+  - 金、ゴールド -> XAUUSDm
+  - 銀、シルバー -> XAGUSDm
+  - BTC、ビットコイン -> BTCUSDm
+  - ETH、イーサ、イーサリアム -> ETHUSDm
+- 結果は JSON 配列だけを `{batch_file}` に保存してください
+- 配列の各要素は次の項目を必ず持たせてください:
+  - user_id
+  - user_url
+  - symbol
+  - direction
+  - post_id
+  - post_url
+  - posted_at
+  - reason
+- 該当がない場合も空の配列 [] を保存してください
+- 保存後に次を実行してください:
+  - python3 `{ingest_script}` ingest --input `{batch_file}`
+- 最後の応答は処理件数だけを短く報告してください

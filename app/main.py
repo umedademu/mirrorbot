@@ -11,6 +11,8 @@ from tkinter import ttk
 
 import MetaTrader5 as mt5
 
+from trade_bridge import AutoTradeBridge
+
 
 UPDATE_INTERVAL_MS = 500
 CHART_BAR_COUNT = 30
@@ -259,6 +261,9 @@ class MT5RateMonitorApp:
         self.positions_tree: ttk.Treeview | None = None
         self.stop_event = threading.Event()
         self.closing = False
+        self.auto_trade = AutoTradeBridge()
+        self.auto_trade_status_var = tk.StringVar(value=self.auto_trade.get_status_text())
+        self.auto_trade_button: ttk.Button | None = None
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -291,6 +296,7 @@ class MT5RateMonitorApp:
         style.configure("Bottom.TFrame", background=TILE_BG)
         style.configure("Summary.TLabel", background=TILE_BG, foreground=TEXT_MAIN)
         style.configure("Toolbar.TFrame", background=PAGE_BG)
+        style.configure("ToolbarStatus.TLabel", background=PAGE_BG, foreground=TEXT_MAIN)
         style.configure(
             "Positions.Treeview",
             background=TILE_BG,
@@ -368,6 +374,23 @@ class MT5RateMonitorApp:
             )
             button.grid(row=0, column=index, padx=(0, 6))
             self.timeframe_buttons[label] = button
+        spacer_column = len(TIMEFRAME_OPTIONS)
+        toolbar.columnconfigure(spacer_column, weight=1)
+        ttk.Frame(toolbar, style="Toolbar.TFrame").grid(row=0, column=spacer_column, sticky="ew")
+        ttk.Label(
+            toolbar,
+            textvariable=self.auto_trade_status_var,
+            style="ToolbarStatus.TLabel",
+            font=("Yu Gothic UI Semibold", 9),
+        ).grid(row=0, column=spacer_column + 1, padx=(0, 8), sticky="e")
+        auto_trade_button = ttk.Button(
+            toolbar,
+            text="自動売買を開始" if not self.auto_trade.settings.auto_trade_enabled else "自動売買を停止",
+            command=self._toggle_auto_trade,
+            style="TimeButton.TButton",
+        )
+        auto_trade_button.grid(row=0, column=spacer_column + 2, sticky="e")
+        self.auto_trade_button = auto_trade_button
         self._refresh_timeframe_buttons()
 
         content = ttk.Frame(outer, style="Page.TFrame")
@@ -506,16 +529,20 @@ class MT5RateMonitorApp:
                 timeframe_code = self.selected_timeframe_code
                 snapshots = fetch_snapshots(timeframe_code)
                 positions, account = fetch_positions_and_account()
+                if self.auto_trade.process_cycle(snapshots, positions):
+                    positions, account = fetch_positions_and_account()
+                auto_trade_status = self.auto_trade.get_status_text()
                 self._call_on_main_thread(
-                    lambda data=snapshots, current_positions=positions, current_account=account: self._apply_terminal_state(
+                    lambda data=snapshots, current_positions=positions, current_account=account, trade_status=auto_trade_status: self._apply_terminal_state(
                         data,
                         current_positions,
                         current_account,
+                        trade_status,
                     )
                 )
                 self.stop_event.wait(UPDATE_INTERVAL_MS / 1000)
         except Exception as exc:  # pragma: no cover
-            self._call_on_main_thread(lambda message=str(exc): self._apply_error(message))
+            self._call_on_main_thread(lambda message=str(exc): self._apply_error(message, self.auto_trade.get_status_text()))
         finally:
             mt5.shutdown()
 
@@ -524,6 +551,7 @@ class MT5RateMonitorApp:
         snapshots: dict[str, SymbolSnapshot],
         positions: tuple[PositionSnapshot, ...],
         account: AccountSnapshot,
+        auto_trade_status: str,
     ) -> None:
         positions_by_symbol: dict[str, list[PositionSnapshot]] = {}
         for position in positions:
@@ -543,9 +571,10 @@ class MT5RateMonitorApp:
             )
         self._refresh_positions(positions)
         self.account_summary_var.set(account.summary_text)
+        self.auto_trade_status_var.set(auto_trade_status)
         self._set_window_title("接続済み")
 
-    def _apply_error(self, message: str) -> None:
+    def _apply_error(self, message: str, auto_trade_status: str) -> None:
         for symbol in ALL_SYMBOLS:
             self.quote_vars[symbol]["bid"].set("--")
             self.quote_vars[symbol]["ask"].set("--")
@@ -554,6 +583,7 @@ class MT5RateMonitorApp:
             self.chart_canvases[symbol].delete("all")
         self._refresh_positions(())
         self.account_summary_var.set("残高: --    有効証拠金: --    必要証拠金: --    余剰証拠金: --    証拠金維持率: --")
+        self.auto_trade_status_var.set(auto_trade_status)
         self._set_window_title(message)
 
     def _draw_chart(
@@ -789,6 +819,12 @@ class MT5RateMonitorApp:
             style_name = "TimeButtonActive.TButton" if label == self.selected_timeframe_label else "TimeButton.TButton"
             button.configure(style=style_name)
 
+    def _toggle_auto_trade(self) -> None:
+        enabled = self.auto_trade.toggle_enabled()
+        self.auto_trade_status_var.set(self.auto_trade.get_status_text())
+        if self.auto_trade_button is not None:
+            self.auto_trade_button.configure(text="自動売買を停止" if enabled else "自動売買を開始")
+
     def _toggle_maximize(self, symbol: str) -> None:
         if self.content_frame is None:
             return
@@ -841,6 +877,7 @@ class MT5RateMonitorApp:
     def _on_close(self) -> None:
         self.closing = True
         self.stop_event.set()
+        self.auto_trade.close()
         self.root.destroy()
 
 
