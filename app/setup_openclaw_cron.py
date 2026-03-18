@@ -14,8 +14,9 @@ WSL_DISTRO = "Ubuntu-24.04"
 GATEWAY_SERVICE = "openclaw-gateway.service"
 JOB_NAME = "mirrorbot-x-watch"
 JOB_DESCRIPTION = "mirrorbot の X シグナル取り込み"
-JOB_EXPR = "*/15 * * * *"
+JOB_EXPR = "*/20 * * * *"
 JOB_TZ = "Asia/Tokyo"
+DISCORD_CHANNEL_ID = "1483783703174971442"
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,10 @@ def build_job(existing: dict[str, object] | None, message: str) -> dict[str, obj
             "timeoutSeconds": 600,
         },
         "delivery": {
-            "mode": "none",
+            "mode": "announce",
+            "channel": "discord",
+            "to": f"channel:{DISCORD_CHANNEL_ID}",
+            "accountId": "default",
         },
         "state": state,
     }
