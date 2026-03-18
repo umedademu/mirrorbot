@@ -35,16 +35,26 @@ python main.py
 
 ## OpenClaw 連携
 
-- OpenClaw の 20 分実行を登録するには、ルートで `python app\setup_openclaw_cron.py` を実行します
+- `main.py` を起動している間は、`app\live_x_monitor.py` が約 30 秒ごとに X の本文だけを軽く確認します
+- 監視対象は `Light_Yagami_a`、`d_o_b46`、`mutachan41`、`btchakudaku`、`cb_terminal` の 5 アカウントです
+- 新着投稿があったときだけ OpenClaw に本文を渡して解釈させ、結果を `app\runtime\openclaw\signal_inbox.jsonl` に流します
+- 画面下部には、最近読み込んだ投稿と、その判定結果や見送り理由を表示します
+- 起動直後の最初の 1 回は、直近投稿を既読扱いにして誤発注を避けます
 - OpenClaw からの受け取りは `app\runtime\openclaw\signal_inbox.jsonl` に追記されます
 - mirrorbot の取引台帳は `app\runtime\mirrorbot.db` に保存されます
-- OpenClaw の X 巡回は BrowserRelay の 1 タブだけを使い、4 アカウントを順番に見に行きます
+- OpenClaw へ渡す前に、`app\openclaw_x_text_fetch.py` が X の本文だけを集めます
+- 本文取得は `https://syndication.twitter.com` の埋め込みタイムラインを使い、BrowserRelay や画像解析は使いません
+- 判定は、単なる感想ではなく、投稿者が実際に行っている売買をなぞれると読める場合だけシグナル化します
+- `app\x_timeline_cookie.txt` に Cookie 文字列を置くと、取得の鮮度が上がる前提で動かせます
+- 書式の見本は `app\x_timeline_cookie.example.txt` です
 - OpenClaw の各回の分析結果は Discord の `ミラトレbot` チャンネルにも送られます
+- 既存の 20 分実行を使いたい場合だけ、補助用としてルートで `python app\setup_openclaw_cron.py` を実行します
 - 自動売買の初期状態は停止です
 - 画面右上のボタンで開始と停止を切り替えられます
 - 画面右上の `数量設定` から、共通数量と銘柄ごとの数量を変更できます
 - 各銘柄の数量が空欄なら共通数量を使い、共通数量も空欄ならその銘柄の最小数量を使います
 - `app\trade_settings.json` は画面から保存した内容の保存先です
+- 既読管理は `app\runtime\openclaw\x_monitor_state.json` に保存されます
 
 ## 補足
 

@@ -11,6 +11,7 @@ from tkinter import messagebox, ttk
 
 import MetaTrader5 as mt5
 
+from live_x_monitor import OpenClawLiveMonitor, XMonitorRow
 from trade_bridge import AutoTradeBridge
 
 
@@ -230,8 +231,8 @@ class MT5RateMonitorApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("MT5 Rate Monitor")
-        self.root.geometry("1260x640")
-        self.root.minsize(1080, 560)
+        self.root.geometry("1260x780")
+        self.root.minsize(1080, 680)
         self.root.configure(bg=PAGE_BG)
 
         self.quote_vars = {
@@ -267,8 +268,13 @@ class MT5RateMonitorApp:
         self.volume_settings_window: tk.Toplevel | None = None
         self.volume_default_var = tk.StringVar()
         self.volume_symbol_vars: dict[str, tk.StringVar] = {}
+        self.x_monitor_status_var = tk.StringVar(value="X監視: 起動準備中")
+        self.x_monitor_tree: ttk.Treeview | None = None
+        self.x_monitor = OpenClawLiveMonitor(on_state_change=self._queue_x_monitor_state)
 
         self._build_ui()
+        initial_x_status, initial_x_rows = self.x_monitor.get_snapshot()
+        self._apply_x_monitor_state(initial_x_status, initial_x_rows)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._start_monitor()
 
@@ -473,6 +479,13 @@ class MT5RateMonitorApp:
         bottom.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         bottom.columnconfigure(0, weight=1)
 
+        ttk.Label(
+            bottom,
+            text="保有ポジション",
+            style="Summary.TLabel",
+            font=("Yu Gothic UI Semibold", 9),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
         columns = (
             "symbol",
             "ticket",
@@ -490,10 +503,10 @@ class MT5RateMonitorApp:
             bottom,
             columns=columns,
             show="headings",
-            height=5,
+            height=4,
             style="Positions.Treeview",
         )
-        tree.grid(row=0, column=0, sticky="ew")
+        tree.grid(row=1, column=0, sticky="ew")
         self.positions_tree = tree
 
         headings = (
@@ -514,20 +527,63 @@ class MT5RateMonitorApp:
             tree.column(column_id, width=width, minwidth=width, anchor=anchor, stretch=True)
 
         tree_scroll = ttk.Scrollbar(bottom, orient="horizontal", command=tree.xview)
-        tree_scroll.grid(row=1, column=0, sticky="ew")
+        tree_scroll.grid(row=2, column=0, sticky="ew")
         tree.configure(xscrollcommand=tree_scroll.set)
+
+        ttk.Label(
+            bottom,
+            textvariable=self.x_monitor_status_var,
+            style="Summary.TLabel",
+            font=("Yu Gothic UI Semibold", 9),
+        ).grid(row=3, column=0, sticky="w", pady=(10, 6))
+
+        x_columns = (
+            "checked_at",
+            "posted_at",
+            "user_id",
+            "text",
+            "judgment",
+            "reason",
+        )
+        x_tree = ttk.Treeview(
+            bottom,
+            columns=x_columns,
+            show="headings",
+            height=6,
+            style="Positions.Treeview",
+        )
+        x_tree.grid(row=4, column=0, sticky="ew")
+        self.x_monitor_tree = x_tree
+
+        x_headings = (
+            ("checked_at", "確認", 70, "center"),
+            ("posted_at", "投稿時刻", 90, "center"),
+            ("user_id", "ユーザー", 120, "w"),
+            ("text", "本文", 360, "w"),
+            ("judgment", "判定", 210, "w"),
+            ("reason", "理由", 360, "w"),
+        )
+        for column_id, heading_text, width, anchor in x_headings:
+            x_tree.heading(column_id, text=heading_text, anchor=anchor)
+            x_tree.column(column_id, width=width, minwidth=width, anchor=anchor, stretch=True)
+
+        x_tree_scroll = ttk.Scrollbar(bottom, orient="horizontal", command=x_tree.xview)
+        x_tree_scroll.grid(row=5, column=0, sticky="ew")
+        x_tree.configure(xscrollcommand=x_tree_scroll.set)
 
         ttk.Label(
             bottom,
             textvariable=self.account_summary_var,
             style="Summary.TLabel",
             font=("Yu Gothic UI Semibold", 10),
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ).grid(row=6, column=0, sticky="w", pady=(10, 0))
 
     def _start_monitor(self) -> None:
         self._set_window_title("接続中")
         thread = threading.Thread(target=self._monitor_loop, daemon=True)
         thread.start()
+        x_thread = threading.Thread(target=self._x_monitor_loop, daemon=True)
+        x_thread.start()
 
     def _monitor_loop(self) -> None:
         try:
@@ -554,6 +610,12 @@ class MT5RateMonitorApp:
             self._call_on_main_thread(lambda message=str(exc): self._apply_error(message, self.auto_trade.get_status_text()))
         finally:
             mt5.shutdown()
+
+    def _x_monitor_loop(self) -> None:
+        try:
+            self.x_monitor.run(self.stop_event)
+        except Exception as exc:  # pragma: no cover
+            self._queue_x_monitor_state(f"X監視: {exc}", ())
 
     def _apply_terminal_state(
         self,
@@ -582,6 +644,13 @@ class MT5RateMonitorApp:
         self.account_summary_var.set(account.summary_text)
         self.auto_trade_status_var.set(auto_trade_status)
         self._set_window_title("接続済み")
+
+    def _queue_x_monitor_state(self, status_text: str, rows: tuple[XMonitorRow, ...]) -> None:
+        self._call_on_main_thread(lambda status=status_text, current_rows=rows: self._apply_x_monitor_state(status, current_rows))
+
+    def _apply_x_monitor_state(self, status_text: str, rows: tuple[XMonitorRow, ...]) -> None:
+        self.x_monitor_status_var.set(status_text)
+        self._refresh_x_monitor_rows(rows)
 
     def _apply_error(self, message: str, auto_trade_status: str) -> None:
         for symbol in ALL_SYMBOLS:
@@ -808,6 +877,25 @@ class MT5RateMonitorApp:
                     position.price_current,
                     position.swap,
                     position.profit,
+                ),
+            )
+
+    def _refresh_x_monitor_rows(self, rows: tuple[XMonitorRow, ...]) -> None:
+        if self.x_monitor_tree is None:
+            return
+
+        self.x_monitor_tree.delete(*self.x_monitor_tree.get_children())
+        for row in rows:
+            self.x_monitor_tree.insert(
+                "",
+                "end",
+                values=(
+                    row.checked_at,
+                    row.posted_at,
+                    row.user_id,
+                    row.text,
+                    row.judgment,
+                    row.reason,
                 ),
             )
 

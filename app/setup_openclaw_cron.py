@@ -24,6 +24,9 @@ class Paths:
     prompt_path: Path
     batch_path: Path
     ingest_script_path: Path
+    posts_json_path: Path
+    posts_text_path: Path
+    fetch_script_path: Path
 
 
 def run_wsl(command: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -47,6 +50,12 @@ def load_prompt(paths: Paths) -> str:
     return template.format(
         batch_file=to_wsl_path(paths.batch_path),
         ingest_script=to_wsl_path(paths.ingest_script_path),
+        posts_json_file=to_wsl_path(paths.posts_json_path),
+        posts_text_file=to_wsl_path(paths.posts_text_path),
+        fetch_script_windows=paths.fetch_script_path.as_posix().replace("/", "\\"),
+        posts_json_windows=paths.posts_json_path.as_posix().replace("/", "\\"),
+        posts_text_windows=paths.posts_text_path.as_posix().replace("/", "\\"),
+        repo_root_windows=APP_DIR.parent.as_posix().replace("/", "\\"),
     )
 
 
@@ -66,12 +75,13 @@ def build_job(existing: dict[str, object] | None, message: str) -> dict[str, obj
     job_id = str(existing.get("id")) if existing else str(uuid.uuid4())
     created_at_ms = int(existing.get("createdAtMs", now_ms)) if existing else now_ms
     state = existing.get("state") if existing and isinstance(existing.get("state"), dict) else {}
+    enabled = bool(existing.get("enabled")) if existing and isinstance(existing.get("enabled"), bool) else True
 
     return {
         "id": job_id,
         "name": JOB_NAME,
         "description": JOB_DESCRIPTION,
-        "enabled": True,
+        "enabled": enabled,
         "createdAtMs": created_at_ms,
         "updatedAtMs": now_ms,
         "schedule": {
@@ -103,6 +113,9 @@ def sync_job() -> str:
         prompt_path=APP_DIR / "openclaw_cron_prompt.txt",
         batch_path=APP_DIR / "runtime" / "openclaw" / "signal_batch.json",
         ingest_script_path=APP_DIR / "openclaw_signal_ingest.py",
+        posts_json_path=APP_DIR / "runtime" / "openclaw" / "x_posts.json",
+        posts_text_path=APP_DIR / "runtime" / "openclaw" / "x_posts.txt",
+        fetch_script_path=APP_DIR / "openclaw_x_text_fetch.py",
     )
     message = load_prompt(paths)
     jobs_payload = read_jobs()
