@@ -1,6 +1,6 @@
 {
-  "auto_trade_enabled": false,
-  "default_volume": null,
+  "auto_trade_enabled": true,
+  "default_volume": 0.01,
   "symbol_volumes": {},
   "slippage_points": 30,
   "magic_number": 42004201

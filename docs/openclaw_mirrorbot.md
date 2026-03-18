@@ -72,9 +72,11 @@ SQLite の主な列
 3. `python app/setup_openclaw_cron.py` で cron を再同期する
 4. `python app/main.py` で mirrorbot を起動する
 5. 画面右上のボタンで自動売買を開始する
+6. 画面右上の `数量設定` で共通数量と銘柄ごとの数量を保存する
 
 注意
 
 - 初期状態では自動売買は停止
+- 数量設定画面では、各銘柄が空欄なら共通数量を使い、共通数量も空欄なら MT5 側の最小数量を使う
 - OpenClaw 側の X 解析結果がゼロ件なら inbox には何も追記されない
 - BrowserRelay の接続や X 側の表示状態によっては OpenClaw の解析が失敗することがある

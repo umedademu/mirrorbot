@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import MetaTrader5 as mt5
 
@@ -264,6 +264,9 @@ class MT5RateMonitorApp:
         self.auto_trade = AutoTradeBridge()
         self.auto_trade_status_var = tk.StringVar(value=self.auto_trade.get_status_text())
         self.auto_trade_button: ttk.Button | None = None
+        self.volume_settings_window: tk.Toplevel | None = None
+        self.volume_default_var = tk.StringVar()
+        self.volume_symbol_vars: dict[str, tk.StringVar] = {}
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -385,12 +388,18 @@ class MT5RateMonitorApp:
         ).grid(row=0, column=spacer_column + 1, padx=(0, 8), sticky="e")
         auto_trade_button = ttk.Button(
             toolbar,
-            text="自動売買を開始" if not self.auto_trade.settings.auto_trade_enabled else "自動売買を停止",
+            text="自動売買を開始" if not self.auto_trade.is_enabled() else "自動売買を停止",
             command=self._toggle_auto_trade,
             style="TimeButton.TButton",
         )
         auto_trade_button.grid(row=0, column=spacer_column + 2, sticky="e")
         self.auto_trade_button = auto_trade_button
+        ttk.Button(
+            toolbar,
+            text="数量設定",
+            command=self._open_volume_settings,
+            style="TimeButton.TButton",
+        ).grid(row=0, column=spacer_column + 3, padx=(6, 0), sticky="e")
         self._refresh_timeframe_buttons()
 
         content = ttk.Frame(outer, style="Page.TFrame")
@@ -825,6 +834,110 @@ class MT5RateMonitorApp:
         if self.auto_trade_button is not None:
             self.auto_trade_button.configure(text="自動売買を停止" if enabled else "自動売買を開始")
 
+    def _open_volume_settings(self) -> None:
+        if self.volume_settings_window is not None and self.volume_settings_window.winfo_exists():
+            self.volume_settings_window.focus_set()
+            return
+
+        default_text, symbol_texts = self.auto_trade.get_volume_settings()
+        self.volume_default_var = tk.StringVar(value=default_text)
+        self.volume_symbol_vars = {
+            symbol: tk.StringVar(value=symbol_texts.get(symbol, ""))
+            for symbol in ALL_SYMBOLS
+        }
+
+        window = tk.Toplevel(self.root)
+        window.title("数量設定")
+        window.geometry("620x360")
+        window.minsize(620, 360)
+        window.configure(bg=PAGE_BG)
+        window.transient(self.root)
+        window.grab_set()
+        window.protocol("WM_DELETE_WINDOW", self._close_volume_settings)
+        self.volume_settings_window = window
+
+        outer = ttk.Frame(window, style="Page.TFrame", padding=16)
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.columnconfigure(1, weight=1)
+
+        ttk.Label(
+            outer,
+            text="空欄なら共通数量、共通も空欄ならその銘柄の最小数量を使います。",
+            style="ToolbarStatus.TLabel",
+            font=("Yu Gothic UI", 9),
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        shared_frame = ttk.Frame(outer, style="Tile.TFrame", padding=12)
+        shared_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        shared_frame.columnconfigure(1, weight=1)
+        ttk.Label(
+            shared_frame,
+            text="共通数量",
+            style="Summary.TLabel",
+            font=("Yu Gothic UI Semibold", 10),
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Entry(
+            shared_frame,
+            textvariable=self.volume_default_var,
+            width=18,
+            font=("Consolas", 10),
+        ).grid(row=0, column=1, sticky="w")
+
+        for group_index, symbols in enumerate(SYMBOL_ROWS):
+            frame = ttk.Frame(outer, style="Tile.TFrame", padding=12)
+            frame.grid(row=2, column=group_index, sticky="nsew", padx=(0, 6 if group_index == 0 else 0))
+            frame.columnconfigure(1, weight=1)
+
+            for row_index, symbol in enumerate(symbols):
+                ttk.Label(
+                    frame,
+                    text=symbol,
+                    style="Summary.TLabel",
+                    font=("Yu Gothic UI", 10),
+                ).grid(row=row_index, column=0, sticky="w", pady=6, padx=(0, 12))
+                ttk.Entry(
+                    frame,
+                    textvariable=self.volume_symbol_vars[symbol],
+                    width=18,
+                    font=("Consolas", 10),
+                ).grid(row=row_index, column=1, sticky="ew", pady=6)
+
+        action_frame = ttk.Frame(outer, style="Page.TFrame")
+        action_frame.grid(row=3, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        ttk.Button(
+            action_frame,
+            text="閉じる",
+            command=self._close_volume_settings,
+            style="TimeButton.TButton",
+        ).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(
+            action_frame,
+            text="保存",
+            command=self._save_volume_settings,
+            style="TimeButtonActive.TButton",
+        ).grid(row=0, column=1)
+
+    def _save_volume_settings(self) -> None:
+        try:
+            self.auto_trade.update_volume_settings(
+                self.volume_default_var.get(),
+                {symbol: variable.get() for symbol, variable in self.volume_symbol_vars.items()},
+            )
+        except ValueError as exc:
+            messagebox.showerror("数量設定", str(exc), parent=self.volume_settings_window or self.root)
+            return
+
+        messagebox.showinfo("数量設定", "数量設定を保存しました。", parent=self.volume_settings_window or self.root)
+        self._close_volume_settings()
+
+    def _close_volume_settings(self) -> None:
+        if self.volume_settings_window is None:
+            return
+        if self.volume_settings_window.winfo_exists():
+            self.volume_settings_window.destroy()
+        self.volume_settings_window = None
+
     def _toggle_maximize(self, symbol: str) -> None:
         if self.content_frame is None:
             return
@@ -877,6 +990,7 @@ class MT5RateMonitorApp:
     def _on_close(self) -> None:
         self.closing = True
         self.stop_event.set()
+        self._close_volume_settings()
         self.auto_trade.close()
         self.root.destroy()
 

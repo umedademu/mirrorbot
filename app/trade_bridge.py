@@ -13,6 +13,7 @@ import MetaTrader5 as mt5
 
 from bridge_common import (
     OPENCLAW_INBOX_PATH,
+    SUPPORTED_SYMBOLS,
     TRADE_DB_PATH,
     TRADE_SETTINGS_PATH,
     ensure_runtime_layout,
@@ -85,6 +86,7 @@ class AutoTradeBridge:
         self.conn = sqlite3.connect(TRADE_DB_PATH, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._ensure_schema()
+        self._settings_lock = threading.Lock()
         self._status_lock = threading.Lock()
         self._status_text = ""
         self._inbox_offset = 0
@@ -98,11 +100,41 @@ class AutoTradeBridge:
         with self._status_lock:
             return self._status_text
 
+    def is_enabled(self) -> bool:
+        with self._settings_lock:
+            return self.settings.auto_trade_enabled
+
     def toggle_enabled(self) -> bool:
-        self.settings.auto_trade_enabled = not self.settings.auto_trade_enabled
-        save_trade_settings(self.settings_path, self.settings)
-        self._set_status("自動売買: 稼働中" if self.settings.auto_trade_enabled else "自動売買: 停止中")
-        return self.settings.auto_trade_enabled
+        with self._settings_lock:
+            self.settings.auto_trade_enabled = not self.settings.auto_trade_enabled
+            save_trade_settings(self.settings_path, self.settings)
+            enabled = self.settings.auto_trade_enabled
+        self._set_status("自動売買: 稼働中" if enabled else "自動売買: 停止中")
+        return enabled
+
+    def get_volume_settings(self) -> tuple[str, dict[str, str]]:
+        with self._settings_lock:
+            default_text = self._format_volume_text(self.settings.default_volume)
+            symbol_texts = {
+                symbol: self._format_volume_text(self.settings.symbol_volumes.get(symbol))
+                for symbol in SUPPORTED_SYMBOLS
+            }
+        return default_text, symbol_texts
+
+    def update_volume_settings(self, default_volume_text: str, symbol_volume_texts: dict[str, str]) -> None:
+        parsed_default = self._parse_volume_text(default_volume_text, "共通数量")
+        parsed_symbols = {
+            symbol: self._parse_volume_text(symbol_volume_texts.get(symbol, ""), symbol)
+            for symbol in SUPPORTED_SYMBOLS
+        }
+        with self._settings_lock:
+            self.settings.default_volume = parsed_default
+            self.settings.symbol_volumes = {
+                symbol: volume
+                for symbol, volume in parsed_symbols.items()
+                if volume is not None
+            }
+            save_trade_settings(self.settings_path, self.settings)
 
     def process_cycle(self, snapshots: dict[str, Any], positions: tuple[Any, ...]) -> bool:
         changed = self._sync_closed_rows(positions, snapshots)
@@ -205,7 +237,7 @@ class AutoTradeBridge:
             self._set_status(f"自動売買: {signal['user_id']} {signal['symbol']} は同方向のため見送り")
             return False
 
-        if not self.settings.auto_trade_enabled:
+        if not self.is_enabled():
             self._insert_signal_row(signal, entry_price, "ignored", last_error="自動売買が停止中です")
             self._set_status(f"自動売買: 停止中のため {signal['symbol']} を記録のみ")
             return False
@@ -358,13 +390,31 @@ class AutoTradeBridge:
     def _entry_price(self, direction: str, snapshot: Any) -> float:
         return float(snapshot.ask) if direction == "bull" else float(snapshot.bid)
 
+    def _format_volume_text(self, value: float | None) -> str:
+        if value is None:
+            return ""
+        return f"{value:g}"
+
+    def _parse_volume_text(self, text: str, label: str) -> float | None:
+        stripped = text.strip()
+        if not stripped:
+            return None
+        try:
+            value = float(stripped)
+        except ValueError as exc:
+            raise ValueError(f"{label} の数量は数値で入力してください") from exc
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{label} の数量は 0 より大きい値で入力してください")
+        return value
+
     def _resolve_volume(self, symbol: str) -> float:
         info = mt5.symbol_info(symbol)
         if info is None:
             raise RuntimeError(f"{symbol} の数量設定を取得できません")
-        raw_volume = self.settings.symbol_volumes.get(symbol)
-        if raw_volume is None:
-            raw_volume = self.settings.default_volume
+        with self._settings_lock:
+            raw_volume = self.settings.symbol_volumes.get(symbol)
+            if raw_volume is None:
+                raw_volume = self.settings.default_volume
         if raw_volume is None:
             raw_volume = float(info.volume_min)
         step = float(info.volume_step or info.volume_min or 0.01)
@@ -415,8 +465,8 @@ class AutoTradeBridge:
             "volume": self._resolve_volume(symbol),
             "type": order_type,
             "price": price,
-            "deviation": self.settings.slippage_points,
-            "magic": self.settings.magic_number,
+            "deviation": self._current_slippage_points(),
+            "magic": self._current_magic_number(),
             "comment": f"mb:{row_id}",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": self._resolve_filling_mode(symbol),
@@ -469,8 +519,8 @@ class AutoTradeBridge:
             "type": order_type,
             "position": int(ticket),
             "price": price,
-            "deviation": self.settings.slippage_points,
-            "magic": self.settings.magic_number,
+            "deviation": self._current_slippage_points(),
+            "magic": self._current_magic_number(),
             "comment": f"mb-close:{row['id']}",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": self._resolve_filling_mode(symbol),
@@ -573,3 +623,11 @@ class AutoTradeBridge:
         latest = max(matching, key=lambda item: getattr(item, "time_msc", 0) or getattr(item, "time", 0))
         closed_at = datetime.fromtimestamp(getattr(latest, "time", int(end.timestamp()))).astimezone().isoformat(timespec="seconds")
         return float(getattr(latest, "price", 0.0) or 0.0), closed_at
+
+    def _current_slippage_points(self) -> int:
+        with self._settings_lock:
+            return self.settings.slippage_points
+
+    def _current_magic_number(self) -> int:
+        with self._settings_lock:
+            return self.settings.magic_number
