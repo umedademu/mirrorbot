@@ -43,7 +43,7 @@ python main.py
 - 新着通知が来たら、まず本文と同じ投稿者の直近通知だけを OpenClaw に渡して軽く解釈させます
 - 銘柄、上下、指値の意味が曖昧な投稿だけ、OpenClaw に BrowserRelay で追加精査させます
 - Discord 通知に画像 URL が含まれる場合は、追加精査でその画像を先に確認できるようにしています
-- 画面下部には、最近読み込んだ通知と、その判定結果や見送り理由を表示します
+- 画面下部は `口座情報` と `Discord` の 2 タブで、Discord 側のタブに最近読み込んだ通知と、その判定結果や見送り理由を表示します
 - OpenClaw からの受け取りは `app\runtime\openclaw\signal_inbox.jsonl` に追記されます
 - mirrorbot の取引台帳は `app\runtime\mirrorbot.db` に保存されます
 - 直近に読んだ Discord 通知の整理結果は `app\runtime\openclaw\discord_posts.json` に保存されます

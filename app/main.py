@@ -365,6 +365,26 @@ class MT5RateMonitorApp:
             background=[("active", "#31588d"), ("pressed", "#2b4e7e")],
             foreground=[("active", "#ffffff"), ("pressed", "#ffffff")],
         )
+        style.configure(
+            "BottomTab.TNotebook",
+            background=TILE_BG,
+            borderwidth=0,
+            tabmargins=(0, 4, 0, 0),
+        )
+        style.configure(
+            "BottomTab.TNotebook.Tab",
+            background=BUTTON_BG,
+            foreground=TEXT_MAIN,
+            padding=(14, 6),
+            borderwidth=0,
+            lightcolor=BUTTON_BG,
+            darkcolor=BUTTON_BG,
+        )
+        style.map(
+            "BottomTab.TNotebook.Tab",
+            background=[("selected", BUTTON_ACTIVE_BG), ("active", "#1d2d46")],
+            foreground=[("selected", "#ffffff"), ("active", "#ffffff")],
+        )
 
         outer = ttk.Frame(self.root, style="Page.TFrame", padding=16)
         outer.pack(fill="both", expand=True)
@@ -478,9 +498,21 @@ class MT5RateMonitorApp:
         bottom = ttk.Frame(outer, style="Bottom.TFrame", padding=10)
         bottom.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         bottom.columnconfigure(0, weight=1)
+        bottom.rowconfigure(0, weight=1)
+
+        bottom_tabs = ttk.Notebook(bottom, style="BottomTab.TNotebook")
+        bottom_tabs.grid(row=0, column=0, sticky="ew")
+
+        summary_tab = ttk.Frame(bottom_tabs, style="Bottom.TFrame", padding=0)
+        summary_tab.columnconfigure(0, weight=1)
+        bottom_tabs.add(summary_tab, text="口座情報")
+
+        discord_tab = ttk.Frame(bottom_tabs, style="Bottom.TFrame", padding=0)
+        discord_tab.columnconfigure(0, weight=1)
+        bottom_tabs.add(discord_tab, text="Discord")
 
         ttk.Label(
-            bottom,
+            summary_tab,
             text="保有ポジション",
             style="Summary.TLabel",
             font=("Yu Gothic UI Semibold", 9),
@@ -500,7 +532,7 @@ class MT5RateMonitorApp:
             "profit",
         )
         tree = ttk.Treeview(
-            bottom,
+            summary_tab,
             columns=columns,
             show="headings",
             height=4,
@@ -526,16 +558,23 @@ class MT5RateMonitorApp:
             tree.heading(column_id, text=heading_text, anchor=anchor)
             tree.column(column_id, width=width, minwidth=width, anchor=anchor, stretch=True)
 
-        tree_scroll = ttk.Scrollbar(bottom, orient="horizontal", command=tree.xview)
+        tree_scroll = ttk.Scrollbar(summary_tab, orient="horizontal", command=tree.xview)
         tree_scroll.grid(row=2, column=0, sticky="ew")
         tree.configure(xscrollcommand=tree_scroll.set)
 
         ttk.Label(
-            bottom,
+            summary_tab,
+            textvariable=self.account_summary_var,
+            style="Summary.TLabel",
+            font=("Yu Gothic UI Semibold", 10),
+        ).grid(row=3, column=0, sticky="w", pady=(10, 0))
+
+        ttk.Label(
+            discord_tab,
             textvariable=self.x_monitor_status_var,
             style="Summary.TLabel",
             font=("Yu Gothic UI Semibold", 9),
-        ).grid(row=3, column=0, sticky="w", pady=(10, 6))
+        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
 
         x_columns = (
             "checked_at",
@@ -546,13 +585,13 @@ class MT5RateMonitorApp:
             "reason",
         )
         x_tree = ttk.Treeview(
-            bottom,
+            discord_tab,
             columns=x_columns,
             show="headings",
-            height=6,
+            height=8,
             style="Positions.Treeview",
         )
-        x_tree.grid(row=4, column=0, sticky="ew")
+        x_tree.grid(row=1, column=0, sticky="ew")
         self.x_monitor_tree = x_tree
 
         x_headings = (
@@ -567,16 +606,9 @@ class MT5RateMonitorApp:
             x_tree.heading(column_id, text=heading_text, anchor=anchor)
             x_tree.column(column_id, width=width, minwidth=width, anchor=anchor, stretch=True)
 
-        x_tree_scroll = ttk.Scrollbar(bottom, orient="horizontal", command=x_tree.xview)
-        x_tree_scroll.grid(row=5, column=0, sticky="ew")
+        x_tree_scroll = ttk.Scrollbar(discord_tab, orient="horizontal", command=x_tree.xview)
+        x_tree_scroll.grid(row=2, column=0, sticky="ew")
         x_tree.configure(xscrollcommand=x_tree_scroll.set)
-
-        ttk.Label(
-            bottom,
-            textvariable=self.account_summary_var,
-            style="Summary.TLabel",
-            font=("Yu Gothic UI Semibold", 10),
-        ).grid(row=6, column=0, sticky="w", pady=(10, 0))
 
     def _start_monitor(self) -> None:
         self._set_window_title("接続中")
