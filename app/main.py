@@ -268,7 +268,7 @@ class MT5RateMonitorApp:
         self.volume_settings_window: tk.Toplevel | None = None
         self.volume_default_var = tk.StringVar()
         self.volume_symbol_vars: dict[str, tk.StringVar] = {}
-        self.x_monitor_status_var = tk.StringVar(value="X監視: 起動準備中")
+        self.x_monitor_status_var = tk.StringVar(value="Discord監視: 起動準備中")
         self.x_monitor_tree: ttk.Treeview | None = None
         self.x_monitor = OpenClawLiveMonitor(on_state_change=self._queue_x_monitor_state)
 
@@ -615,7 +615,7 @@ class MT5RateMonitorApp:
         try:
             self.x_monitor.run(self.stop_event)
         except Exception as exc:  # pragma: no cover
-            self._queue_x_monitor_state(f"X監視: {exc}", ())
+            self._queue_x_monitor_state(f"Discord監視: {exc}", ())
 
     def _apply_terminal_state(
         self,

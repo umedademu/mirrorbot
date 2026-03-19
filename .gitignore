@@ -1,4 +1,3 @@
 app/runtime/
 app/__pycache__/
 *.pyc
-app/x_timeline_cookie.txt
